@@ -90,7 +90,7 @@ The drone itself does not need to understand natural language. It receives struc
 
 ---
 
-## ⚡ GO — Fast Control Policy
+## GO — Fast Control Policy
 
 GO is Novex's lightweight real-time control layer.
 
