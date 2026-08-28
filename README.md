@@ -15,7 +15,7 @@ The goal is simple:
 
 ---
 
-## 🧠 Architecture
+## Architecture
 
 Novex is designed as a layered system rather than one large AI model.
 
@@ -127,7 +127,7 @@ This separates **reasoning** from **reflexive control**.
 
 ---
 
-## 🎮 Controller Interface
+## Controller Interface
 
 Novex can interface with existing robotic platforms through hardware-specific controller adapters.
 
