@@ -1,3 +1,4 @@
 {
-  "idf.customExtraVars": {}
+  "idf.customExtraVars": {},
+  "idf.currentSetup": "/home/isodev/.espressif/v6.1/esp-idf"
 }
