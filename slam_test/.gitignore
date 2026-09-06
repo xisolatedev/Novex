@@ -1,0 +1,17 @@
+# ORB-SLAM3 and Pangolin are fetched and built by scripts/, not vendored.
+third_party/
+
+# Build output of the pybind11 module.
+native/build/
+src/*.so
+__pycache__/
+*.pyc
+
+# GENERATED from config/stereo_calibration.yaml on every run.
+config/orbslam3_stereo.yaml
+
+# Your own calibration and captures. stereo_calibration.yaml is
+# intentionally NOT ignored - it is a real measurement of your hardware
+# and worth committing once you have it.
+calibration/pairs/
+recordings/

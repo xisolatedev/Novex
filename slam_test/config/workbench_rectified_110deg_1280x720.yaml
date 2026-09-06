@@ -1,0 +1,86 @@
+%YAML:1.0
+#====================================================================
+# EXPORTED BY THE NOVEX STEREO WORKBENCH
+# 2026-09-05T18:18:39
+#
+# Source calibration : /media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/slam_test/config/stereo_calibration.yaml
+# Camera model       : rectified
+# Output resolution  : 1280 x 720
+# Rectified FOV      : 110.00 deg horizontal
+# Baseline           : 108.826 mm
+#
+# All camera parameters are exactly as measured by
+# src/calibrate_stereo.py. Only the output geometry
+# (resolution / field of view) was chosen here.
+#
+# Notes:
+#   Measured live at export: 0 stereo matches, 0.0% epipolar inliers, median epipolar error 0.00 px, 100.0% valid pixels.
+#
+# Pipeline sidecar   : workbench_rectified_110deg_1280x720.novex.yaml
+#   (lets main.py --settings rebuild the identical pipeline)
+#====================================================================
+
+
+#--------------------------------------------------------------------
+# GENERATED FILE - do not edit by hand.
+#
+# Written by Novex src/calibration.py from
+#   /media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/slam_test/config/stereo_calibration.yaml
+# on 2026-09-05T18:18:39
+#
+# The images ORB-SLAM3 receives have ALREADY been undistorted and
+# rectified by StereoRectifier using the fisheye model, so from
+# ORB-SLAM3's point of view this is an ideal pinhole stereo pair with
+# zero distortion. That is what Camera.type "Rectified" means.
+#--------------------------------------------------------------------
+File.version: "1.0"
+
+Camera.type: "Rectified"
+
+# Rectified intrinsics, identical for both eyes by construction
+# (taken from P1 of cv2.fisheye.stereoRectify).
+Camera1.fx: 448.132824
+Camera1.fy: 448.132824
+Camera1.cx: 640.000000
+Camera1.cy: 360.000000
+
+Camera.width: 1280
+Camera.height: 720
+Camera.fps: 30
+
+# Images are fed as grayscale, so this is ignored.
+Camera.RGB: 0
+
+# MEASURED baseline in metres, from the chessboard stereo calibration.
+Stereo.b: 0.10882635
+
+# Points closer than ThDepth * baseline are treated as "close" and can
+# be triangulated from a single stereo pair. Beyond that they are
+# treated like monocular observations.
+Stereo.ThDepth: 60.0
+
+#--------------------------------------------------------------------
+# ORB extractor
+#--------------------------------------------------------------------
+ORBextractor.nFeatures: 1200
+ORBextractor.scaleFactor: 1.2
+ORBextractor.nLevels: 8
+ORBextractor.iniThFAST: 12
+ORBextractor.minThFAST: 5
+
+#--------------------------------------------------------------------
+# Viewer
+#
+# Only used if ORB-SLAM3's own Pangolin viewer is enabled with
+# --orbslam-viewer. The Novex GUI draws its own 3D view.
+#--------------------------------------------------------------------
+Viewer.KeyFrameSize: 0.05
+Viewer.KeyFrameLineWidth: 1.0
+Viewer.GraphLineWidth: 0.9
+Viewer.PointSize: 2.0
+Viewer.CameraSize: 0.08
+Viewer.CameraLineWidth: 3.0
+Viewer.ViewpointX: 0.0
+Viewer.ViewpointY: -0.7
+Viewer.ViewpointZ: -1.8
+Viewer.ViewpointF: 500.0

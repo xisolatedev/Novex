@@ -1,0 +1,24 @@
+# Python dependencies for the Novex ORB-SLAM3 test.
+#
+#   python3 -m venv .venv
+#   .venv/bin/pip install -r slam_test/requirements.txt
+#
+# The heavy lifting (ORB-SLAM3 itself) is native code built by
+# scripts/01_build_orbslam3.sh; none of it comes from pip.
+
+# GUI framework.
+PySide6>=6.5
+
+# Camera capture, fisheye calibration, rectification, image handling.
+# opencv-python includes the calib3d fisheye functions the calibration
+# tool needs.
+opencv-python>=4.8
+
+numpy>=1.24
+
+# Reading and writing config/*.yaml.
+PyYAML>=6.0
+
+# Build-time only: provides the CMake config used by
+# scripts/02_build_binding.sh to compile the ORB-SLAM3 binding.
+pybind11>=2.11
