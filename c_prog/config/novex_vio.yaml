@@ -1,0 +1,217 @@
+# ============================================================
+# Novex VIO runtime configuration
+# ============================================================
+# Everything here can also be set on the command line, and the
+# command line wins. This file does NOT hold the stereo calibration -
+# that stays in config/stereo_calibration.yaml and is never written by
+# this program.
+#
+# The defaults below are the ones compiled into the binary, so a
+# missing config file is a working configuration.
+# ============================================================
+
+# daemon = headless, no window, IPC server. This is the deployment
+# mode. gui is for development only.
+mode: daemon
+
+# debug | info | warn | error | none
+log_level: info
+
+calibration_path: config/stereo_calibration.yaml
+
+# How often the daemon prints one performance line. Never per frame.
+stats_interval_s: 5.0
+
+
+camera:
+  device: 0
+
+  # The COMBINED side-by-side frame. Left eye is columns
+  # 0 .. width/2-1, right eye is the remainder.
+  #
+  # 1280x480 gives 640x480 per eye at 30 fps in MJPG. See the note in
+  # StereoCalibration.hpp: this mode is a centered 960x720 crop of the
+  # calibrated 1280x720 eye, scaled by 2/3, and the calibration is
+  # adapted accordingly. It costs about 25% of the horizontal field of
+  # view.
+  #
+  # 2560x720 (1280x720 per eye) is also available at 30 fps and keeps
+  # the entire calibrated field of view, at four times the pixel cost.
+  # On a Pi Zero 2 W that is unlikely to hold 30 fps; measure before
+  # choosing it.
+  width: 1280
+  height: 480
+  fps: 30
+
+  # Without MJPG the camera falls back to uncompressed YUYV, which
+  # cannot carry this resolution at 30 fps over USB.
+  mjpeg: true
+
+  # Decode MJPG straight to grayscale instead of decoding to BGR and
+  # converting. Measured 4.18 ms vs 6.00 ms per frame at 1280x480 on
+  # the development machine. Colour is never used by the pipeline.
+  direct_gray: true
+
+  # Set true if the physical left lens lands on the right half.
+  swap_eyes: false
+
+  # V4L2 queue depth. 0 = leave it to the driver.
+  #
+  # Do not set this to 1. Measured on this camera at 1280x480 MJPG,
+  # a depth of 1 gives 15.7 fps instead of 30.0, because nothing is
+  # queued to the hardware while userspace holds the only buffer.
+  # Latency is managed by max_frame_drop below instead.
+  buffer_size: 0
+
+  # Maximum stale frames to discard when processing falls behind.
+  # 0 disables dropping, which trades latency for completeness.
+  max_frame_drop: 3
+
+
+features:
+  # 400 is a starting point, not a measured optimum for the Pi Zero
+  # 2 W. It is deliberately far below the 1500 in the ORB-SLAM3 config,
+  # because KLT tracking cost is close to linear in feature count and
+  # that config was written for a desktop.
+  max: 400
+
+  # Re-detect once tracking drops below this fraction of the target.
+  redetect_ratio: 0.6
+
+  # Detection runs per grid cell, so features cannot all pile onto the
+  # one well-textured object in the room.
+  grid_cols: 8
+  grid_rows: 6
+
+  min_distance: 12.0
+  quality: 0.01
+
+  klt_window: 21
+  klt_levels: 3
+
+  # Forward-backward consistency, in pixels.
+  fb_threshold_px: 1.0
+
+
+stereo:
+  enabled: true
+
+  # Sampson distance in NORMALISED camera units, so it does not change
+  # meaning when the resolution does. 0.006 is roughly 1.7 px at the
+  # 640x480 focal length.
+  epipolar_threshold: 0.008
+
+  # Forward-backward threshold for the left-right match, in pixels.
+  # Looser than the temporal one on purpose: the two images come from
+  # different lenses with different local distortion, so a patch is
+  # never quite the same shape in both.
+  fb_threshold_px: 1.5
+
+  # Points beyond the far limit have sub-pixel disparity at a 110 mm
+  # baseline; their depth is noise.
+  min_depth_m: 0.15
+  max_depth_m: 25.0
+
+
+motion:
+  min_inliers: 12
+
+  # Also in normalised camera units.
+  ransac_error: 0.004
+  ransac_iterations: 100
+  ransac_confidence: 0.99
+
+
+imu:
+  # The IMU is optional in the strong sense: with it disabled the
+  # system is a stereo visual odometry pipeline and nothing is stubbed
+  # out or faked.
+  enabled: false
+
+  # none | iio
+  # iio reads a Linux Industrial I/O device, which is how a normal
+  # MEMS IMU appears once its kernel driver is loaded.
+  backend: iio
+
+  # Leave empty to autodetect the first IIO device exposing both
+  # in_accel_*_raw and in_anglvel_*_raw.
+  device_path: ''
+
+  rate_hz: 200
+  buffer_size: 2048
+
+  propagate_on_loss: true
+
+  static_gyro_threshold: 0.03
+
+  # Rotation from the IMU body frame to the left camera frame,
+  # row-major.
+  #
+  # IDENTITY IS A PLACEHOLDER. No camera-IMU extrinsic calibration
+  # exists for this hardware yet. Until one does, the IMU is only used
+  # where a wrong extrinsic cannot corrupt the estimate.
+  R_camera_from_body:
+  - 1.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 1.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 1.0
+
+
+# ------------------------------------------------------------
+# Diagnostics
+# ------------------------------------------------------------
+debug:
+  # --debug. Collects per-frame statistics and prints a report on
+  # exit. The per-frame cost is a handful of increments and one
+  # histogram bump; percentiles are computed only at exit. Off by
+  # default so a normal run pays nothing.
+  enabled: false
+
+
+# ------------------------------------------------------------
+# Web visualisation
+# ------------------------------------------------------------
+web:
+  # --web. Starts the Node.js + Three.js dashboard as a managed child
+  # process and streams state to it over the IPC socket below.
+  #
+  # The dashboard is a development tool. It has no authentication and
+  # can reset the estimator, which is why the bind address defaults to
+  # loopback and should stay there.
+  enabled: false
+
+  host: 127.0.0.1
+  port: 8080
+
+  # How fast the daemon pushes state to the dashboard. The VIO runs at
+  # its own rate regardless; this only controls the visualisation, and
+  # an update that cannot be delivered is dropped rather than queued.
+  update_hz: 20.0
+
+  # Directory containing server.js. Relative paths resolve against the
+  # working directory.
+  root: web
+
+  # Empty means whatever `node` is on PATH.
+  node_path: ''
+
+  # Set false to run the Node server yourself (under nodemon, a
+  # debugger, or on another machine) while novex-vio only serves the
+  # socket.
+  auto_start: true
+
+
+ipc:
+  enabled: true
+  socket_path: /tmp/novex-vio.sock
+  max_clients: 8
+
+
+gui:
+  show_features: true
+  show_right: true

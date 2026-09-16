@@ -1,0 +1,245 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            // The one you want for "run it with the GUI".
+            //
+            // cwd MUST be the project root: novex-vio resolves
+            // config/novex_vio.yaml and config/stereo_calibration.yaml
+            // relative to where it is started, and a missing
+            // calibration is fatal.
+            //
+            // Press escape or q in the window to quit cleanly.
+            "name": "GUI (no IMU)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/novex-vio",
+            "args": [
+                "--mode", "gui",
+                "--no-imu"
+            ],
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "preLaunchTask": "build",
+            "setupCommands": [
+                {
+                    "description": "Render std:: and cv:: types readably",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            // Same, but asks for the IMU. With no IMU attached this
+            // logs one warning and carries on as visual odometry -
+            // that is the designed behaviour, not a failure.
+            "name": "GUI (with IMU)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/novex-vio",
+            "args": [
+                "--mode", "gui",
+                "--imu"
+            ],
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "preLaunchTask": "build",
+            "setupCommands": [
+                {
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            // Verbose start-up, including the full calibration dump
+            // showing both the calibrated and the adapted intrinsics.
+            "name": "GUI (debug logging)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/novex-vio",
+            "args": [
+                "--mode", "gui",
+                "--no-imu",
+                "--log", "debug"
+            ],
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "preLaunchTask": "build",
+            "setupCommands": [
+                {
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            // Unoptimised build of OUR code, for stepping through it
+            // without the optimiser reordering everything.
+            //
+            // It still runs at full rate: measured 9.92 ms per frame
+            // against 9.53 ms for Release, both holding 30 fps. That
+            // is because almost all the cost sits inside OpenCV -
+            // KLT, the JPEG decode, PnP - which is the distribution's
+            // own optimised build either way. Only Novex code is -O0.
+            //
+            // Still prefer the Release configurations for judging
+            // performance, since that is what ships.
+            "name": "GUI (step-debuggable, -O0)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build-debug/novex-vio",
+            "args": [
+                "--mode", "gui",
+                "--no-imu",
+                "--log", "debug"
+            ],
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "preLaunchTask": "build (debug)",
+            "setupCommands": [
+                {
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            // Headless. Opens no window and needs no display, exactly
+            // as it runs on the Pi. Query it with the "run: query
+            // daemon state" task or ./build/novex-state.
+            "name": "Daemon (headless)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/novex-vio",
+            "args": [
+                "--mode", "daemon",
+                "--no-imu"
+            ],
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "preLaunchTask": "build",
+            "setupCommands": [
+                {
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            // Benchmark mode: prints the full statistics report on
+            // exit. Report goes to stdout, logs to stderr.
+            "name": "Debug benchmark (--debug)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/novex-vio",
+            "args": [
+                "--debug",
+                "--max-frames", "900"
+            ],
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "preLaunchTask": "build",
+            "setupCommands": [
+                {
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            // Three.js dashboard on http://127.0.0.1:8080.
+            // novex-vio starts and stops the Node server itself.
+            "name": "Web dashboard (--debug --web)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/novex-vio",
+            "args": [
+                "--debug",
+                "--web"
+            ],
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "preLaunchTask": "build",
+            "setupCommands": [
+                {
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            // Dashboard plus the GUI window, both live.
+            "name": "GUI + web (--mode gui --debug --web)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/novex-vio",
+            "args": [
+                "--mode", "gui",
+                "--debug",
+                "--web"
+            ],
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "preLaunchTask": "build",
+            "setupCommands": [
+                {
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            "name": "Validation suite",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/novex-vio-test",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "preLaunchTask": "build",
+            "setupCommands": [
+                {
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        }
+    ]
+}

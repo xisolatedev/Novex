@@ -1,0 +1,8 @@
+# CMake build trees. Both are reproducible from CMakeLists.txt:
+# `build` is the Release tree the tasks and launch configs use,
+# `build-debug` is the -O0 tree the step-debugging config uses.
+build/
+build-debug/
+
+# Runtime artefacts
+*.sock

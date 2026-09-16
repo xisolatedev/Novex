@@ -1,0 +1,238 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            // Idempotent: safe to run every time, cheap once the
+            // build directory already exists. Having it as a
+            // dependency of the build tasks is what makes a fresh
+            // clone work, where `cmake --build build` alone fails
+            // with "build is not a directory".
+            "label": "cmake: configure (release)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-S", "${workspaceFolder}",
+                "-B", "${workspaceFolder}/build",
+                "-DCMAKE_BUILD_TYPE=Release"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "silent",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "build",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build", "${workspaceFolder}/build",
+                "--parallel", "4"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": "cmake: configure (release)",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "presentation": {
+                "reveal": "silent",
+                "clear": true,
+                "panel": "shared"
+            }
+        },
+        {
+            // A separate directory, so the optimised binary you
+            // actually deploy is never overwritten by an unoptimised
+            // one, and so switching between them needs no
+            // reconfigure.
+            //
+            // The Debug tree is only ~4% slower per frame here
+            // (9.92 ms against 9.53 ms) because the heavy work is
+            // inside OpenCV, which is optimised either way.
+            "label": "cmake: configure (debug)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-S", "${workspaceFolder}",
+                "-B", "${workspaceFolder}/build-debug",
+                "-DCMAKE_BUILD_TYPE=Debug"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "silent",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "build (debug)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build", "${workspaceFolder}/build-debug",
+                "--parallel", "4"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": "cmake: configure (debug)",
+            "group": "build",
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "presentation": {
+                "reveal": "silent",
+                "clear": true,
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "rebuild (clean)",
+            "type": "shell",
+            "command": "rm -rf '${workspaceFolder}/build' && cmake -S '${workspaceFolder}' -B '${workspaceFolder}/build' -DCMAKE_BUILD_TYPE=Release && cmake --build '${workspaceFolder}/build' --parallel 4",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
+        {
+            // 24 in-process checks. Needs the camera for 9 of them;
+            // those report SKIP rather than passing when it is absent.
+            "label": "test: validation suite",
+            "type": "shell",
+            "command": "${workspaceFolder}/build/novex-vio-test",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": "build",
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "clear": true,
+                "panel": "dedicated"
+            }
+        },
+        {
+            "label": "test: lifecycle (daemon, IPC, signals)",
+            "type": "shell",
+            "command": "${workspaceFolder}/tests/test_lifecycle.sh",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": "build",
+            "group": "test",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "clear": true,
+                "panel": "dedicated"
+            }
+        },
+        {
+            "label": "test: web and debug modes",
+            "type": "shell",
+            "command": "${workspaceFolder}/tests/test_web.sh",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": "build",
+            "group": "test",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "clear": true,
+                "panel": "dedicated"
+            }
+        },
+        {
+            // Runs the dashboard's Node server on its own, against a
+            // novex-vio started with --no-web-autostart.
+            "label": "run: web server only",
+            "type": "shell",
+            "command": "node",
+            "args": ["server.js"],
+            "options": {
+                "cwd": "${workspaceFolder}/web",
+                "env": {
+                    "NOVEX_SOCKET": "/tmp/novex-vio.sock",
+                    "PORT": "8080"
+                }
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            }
+        },
+        {
+            "label": "benchmark",
+            "type": "shell",
+            "command": "${workspaceFolder}/tools/benchmark.sh",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": "build",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "clear": true,
+                "panel": "dedicated"
+            }
+        },
+        {
+            // Runs in a dedicated terminal; Ctrl-C stops it, and the
+            // daemon handles SIGINT cleanly. Deliberately not marked
+            // isBackground: VS Code wants a background problem
+            // matcher for that, and there is nothing here to match.
+            "label": "run: daemon",
+            "type": "shell",
+            "command": "${workspaceFolder}/build/novex-vio",
+            "args": [
+                "--mode", "daemon",
+                "--no-imu"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": "build",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            }
+        },
+        {
+            "label": "run: query daemon state",
+            "type": "shell",
+            "command": "${workspaceFolder}/build/novex-state",
+            "args": [
+                "--stats"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            }
+        }
+    ]
+}

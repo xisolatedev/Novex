@@ -1,0 +1,91 @@
+%YAML:1.0
+
+#--------------------------------------------------------------------
+# GENERATED FILE - do not edit by hand.
+#
+# Written by Novex src/calibration.py from
+#   /media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/slam_test/config/stereo_calibration.yaml
+# on 2026-09-06T16:13:37
+#
+# NATIVE FISHEYE STEREO. The images handed to ORB-SLAM3 are the RAW
+# camera images - not undistorted, not rectified, nothing resampled.
+# ORB-SLAM3 applies the Kannala-Brandt model itself, keeping the full
+# field of view instead of the ~100 degrees a pinhole rectification
+# would leave.
+#
+# Stereo depth exists only inside the overlapping column band below.
+# Features outside it are tracked monocularly.
+#--------------------------------------------------------------------
+File.version: "1.0"
+
+Camera.type: "KannalaBrandt8"
+
+Camera1.fx: 323.929090
+Camera1.fy: 326.289365
+Camera1.cx: 464.077582
+Camera1.cy: 277.851230
+
+Camera1.k1: 0.0613721263
+Camera1.k2: -0.0471607919
+Camera1.k3: 0.0185710053
+Camera1.k4: -0.0040310908
+
+Camera2.fx: 325.471353
+Camera2.fy: 328.182322
+Camera2.cx: 495.909648
+Camera2.cy: 255.548056
+
+Camera2.k1: 0.0637619425
+Camera2.k2: -0.0450353090
+Camera2.k3: 0.0107689061
+Camera2.k4: -0.0012511712
+
+# Pose of camera 2 in camera 1's frame: X_left = T_c1_c2 * X_right.
+# Derived from the calibration's X2 = R*X1 + T as [R^T | -R^T T].
+Stereo.T_c1_c2: !!opencv-matrix
+  rows: 4
+  cols: 4
+  dt: f
+  data: [0.999925702476, 0.000597711626, -0.012175067487, 0.110377284727,
+         -0.000631116265, 0.999996046942, -0.002740035030, -0.000130610087,
+         0.012173381607, 0.002747515335, 0.999922126938, -0.001822087195,
+         0.000000000000, 0.000000000000, 0.000000000000, 1.000000000000]
+
+Camera.width: 960
+Camera.height: 540
+Camera.fps: 30
+Camera.RGB: 0
+
+# Columns over which the two lenses see the same scene. ORB-SLAM3
+# restricts stereo matching to this band. Computed by projecting points
+# through both calibrated lenses, not guessed.
+Camera1.overlappingBegin: 0
+Camera1.overlappingEnd: 959
+
+Camera2.overlappingBegin: 5
+Camera2.overlappingEnd: 951
+
+Stereo.ThDepth: 60.0
+
+#--------------------------------------------------------------------
+# ORB extractor
+#--------------------------------------------------------------------
+ORBextractor.nFeatures: 1500
+ORBextractor.scaleFactor: 1.2
+ORBextractor.nLevels: 8
+ORBextractor.iniThFAST: 12
+ORBextractor.minThFAST: 5
+
+#--------------------------------------------------------------------
+# Viewer
+#--------------------------------------------------------------------
+Viewer.KeyFrameSize: 0.05
+Viewer.KeyFrameLineWidth: 1.0
+Viewer.GraphLineWidth: 0.9
+Viewer.PointSize: 2.0
+Viewer.CameraSize: 0.08
+Viewer.CameraLineWidth: 3.0
+Viewer.ViewpointX: 0.0
+Viewer.ViewpointY: -0.7
+Viewer.ViewpointZ: -1.8
+Viewer.ViewpointF: 500.0

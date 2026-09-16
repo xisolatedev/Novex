@@ -1,0 +1,44 @@
+# systemd unit for the Novex VIO daemon.
+#
+# Install:
+#   sudo cp deploy/novex-vio.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now novex-vio
+#
+# This is the answer to "keep running after the SSH session ends".
+# The daemon deliberately does not fork or write a pid file: under
+# systemd that is the wrong shape, and for a manual run `nohup` or a
+# terminal multiplexer does the job without any of the double-fork
+# machinery.
+
+[Unit]
+Description=Novex stereo visual-inertial odometry
+After=multi-user.target
+
+[Service]
+Type=simple
+
+WorkingDirectory=/opt/novex-vio
+ExecStart=/opt/novex-vio/bin/novex-vio --mode daemon \
+    --config /opt/novex-vio/config/novex_vio.yaml
+
+Restart=on-failure
+RestartSec=2
+
+# The camera and the IMU are both group-owned devices.
+User=novex
+SupplementaryGroups=video i2c
+
+# Vision is latency-sensitive and shares a 4-core board with
+# everything else. A modest priority bump keeps a background apt run
+# from stealing the frame budget, without the lockup risk of a real
+# time policy.
+Nice=-5
+
+# The daemon allocates its buffers up front and then holds steady, so
+# a ceiling well above the steady state catches a leak without
+# tripping on normal operation.
+MemoryMax=200M
+
+[Install]
+WantedBy=multi-user.target

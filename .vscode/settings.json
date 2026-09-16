@@ -1,4 +1,5 @@
 {
   "idf.customExtraVars": {},
-  "idf.currentSetup": "/home/isodev/.espressif/v6.1/esp-idf"
+  "idf.currentSetup": "/home/isodev/.espressif/.espressif/v6.1/esp-idf",
+  "cmake.sourceDirectory": "/media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/scan_test"
 }

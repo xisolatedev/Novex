@@ -1,0 +1,16 @@
+{
+  "name": "novex-vio-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Development dashboard for Novex VIO: relays the daemon's Unix socket to a Three.js visualisation over WebSocket.",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "comment": "No dependencies, deliberately. The WebSocket server is in lib/websocket.js and Three.js is vendored in public/vendor, so this runs on a Raspberry Pi with no network and needs no npm install.",
+  "dependencies": {}
+}

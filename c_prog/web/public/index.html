@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Novex VIO</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="scene"></div>
+
+<header id="topbar">
+    <span class="brand">NOVEX VIO</span>
+    <span id="link-state" class="pill pill-bad">disconnected</span>
+    <span id="origin-state" class="pill pill-idle" hidden>Origin: RECENTERED</span>
+    <span class="spacer"></span>
+    <button id="btn-recenter" title="Redefine the reported origin. Tracking is NOT reset.">Recenter</button>
+    <button id="btn-pause">Pause</button>
+    <button id="btn-reset" class="danger" title="Restart tracking and the estimator.">Reset</button>
+</header>
+
+<aside id="panel">
+
+    <section>
+        <h2>VIO Status</h2>
+        <div class="row"><span>VIO</span><b id="s-vio">—</b></div>
+        <div class="row"><span>Tracking</span><b id="s-tracking">—</b></div>
+        <div class="row"><span>Features</span><b id="s-features">—</b></div>
+        <div class="row"><span>Stereo</span><b id="s-stereo">—</b></div>
+        <div class="row"><span>IMU</span><b id="s-imu">—</b></div>
+    </section>
+
+    <section>
+        <h2>Performance</h2>
+        <div class="row"><span>Camera FPS</span><b id="p-camfps">—</b></div>
+        <div class="row"><span>VIO FPS</span><b id="p-viofps">—</b></div>
+        <div class="row"><span>Latency</span><b id="p-latency">—</b></div>
+        <div class="sep"></div>
+        <div class="row"><span>Frame</span><b id="p-frame">—</b></div>
+        <div class="row"><span>Decode</span><b id="p-decode">—</b></div>
+        <div class="row"><span>Detection</span><b id="p-detect">—</b></div>
+        <div class="row"><span>Tracking</span><b id="p-track">—</b></div>
+        <div class="row"><span>Stereo</span><b id="p-stereo">—</b></div>
+        <div class="row"><span>Motion</span><b id="p-motion">—</b></div>
+        <div class="row"><span>State</span><b id="p-state">—</b></div>
+        <div class="row"><span>IMU</span><b id="p-imu">—</b></div>
+    </section>
+
+    <section>
+        <h2>Pose <span class="note">Novex frame</span></h2>
+        <div class="row"><span>X</span><b id="pos-x" class="num">—</b></div>
+        <div class="row"><span>Y <em>(down)</em></span><b id="pos-y" class="num">—</b></div>
+        <div class="row"><span>Z <em>(fwd)</em></span><b id="pos-z" class="num">—</b></div>
+        <div class="sep"></div>
+        <div class="row"><span>Roll</span><b id="rot-r" class="num">—</b></div>
+        <div class="row"><span>Pitch</span><b id="rot-p" class="num">—</b></div>
+        <div class="row"><span>Yaw</span><b id="rot-y" class="num">—</b></div>
+        <div class="hint">
+            Euler angles are display-only. The estimator holds a
+            quaternion and never converts.
+        </div>
+    </section>
+
+    <section>
+        <h2>Tracking</h2>
+        <div class="row"><span>Tracked features</span><b id="t-features">—</b></div>
+        <div class="row"><span>PnP inliers</span><b id="t-inliers">—</b></div>
+        <div class="row"><span>Stereo matched</span><b id="t-matched">—</b></div>
+        <div class="row"><span>Triangulated</span><b id="t-tri">—</b></div>
+        <div class="row"><span>Tracking failures</span><b id="t-fail">—</b></div>
+        <div class="row"><span>Dropped frames</span><b id="t-drop">—</b></div>
+    </section>
+
+    <section id="debug-section">
+        <h2>Debug <span class="note" id="debug-note"></span></h2>
+        <div id="debug-off" class="hint warn">
+            Detailed debug statistics disabled.<br>
+            Start with <code>--debug</code> for detailed timing
+            information.
+        </div>
+        <div id="debug-on" hidden>
+            <div class="row"><span>Runtime</span><b id="d-runtime">—</b></div>
+            <div class="row"><span>Frames</span><b id="d-frames">—</b></div>
+            <div class="row"><span>Avg frame</span><b id="d-avg">—</b></div>
+            <div class="row"><span>Min frame</span><b id="d-min">—</b></div>
+            <div class="row"><span>Max frame</span><b id="d-max">—</b></div>
+            <div class="row"><span>Avg features</span><b id="d-feat">—</b></div>
+            <div class="row"><span>IMU samples</span><b id="d-imu">—</b></div>
+            <div class="row"><span>Trajectory</span><b id="d-traj">—</b></div>
+        </div>
+    </section>
+
+    <section>
+        <h2>Graphs <span class="note">rolling 20 s</span></h2>
+        <div class="graph"><label>VIO frame time (ms)</label>
+            <canvas id="g-frame" width="300" height="52"></canvas></div>
+        <div class="graph"><label>FPS</label>
+            <canvas id="g-fps" width="300" height="52"></canvas></div>
+        <div class="graph"><label>Tracked features</label>
+            <canvas id="g-feat" width="300" height="52"></canvas></div>
+    </section>
+
+    <section>
+        <h2>Scene</h2>
+        <div class="row">
+            <span>Trajectory points</span>
+            <b id="traj-count">0</b>
+        </div>
+        <label class="ctl">
+            Max points
+            <input id="max-points" type="number" min="100" max="200000"
+                   step="100" value="5000">
+        </label>
+        <label class="ctl checkbox">
+            <input id="show-grid" type="checkbox" checked> Grid
+        </label>
+        <div class="hint">
+            Novex is X right, Y <b>down</b>, Z forward (OpenCV camera
+            convention). The scene converts to Three.js Y-up as
+            (x, &minus;y, &minus;z).
+        </div>
+    </section>
+
+</aside>
+
+<div id="hud">drag to orbit &middot; scroll to zoom &middot; right-drag to pan</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

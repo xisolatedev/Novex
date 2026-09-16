@@ -1,0 +1,318 @@
+# ============================================================
+# NOVEX ORB-SLAM3 TEST - camera and pipeline configuration
+# ============================================================
+# This file holds everything you would reasonably want to change
+# without editing code. It does NOT hold the stereo calibration:
+# that lives in config/stereo_calibration.yaml and is produced by
+# src/calibrate_stereo.py from real measurements.
+# ============================================================
+
+camera:
+  index: 0
+
+  # The combined side-by-side frame the camera advertises.
+  # Left eye  = columns 0        .. width/2 - 1
+  # Right eye = columns width/2  .. width - 1
+  width: 2560
+  height: 720
+  fps: 30
+
+  # MJPG matters. Without it most UVC cameras fall back to
+  # uncompressed YUYV, which cannot carry 2560x720 at 30 fps over
+  # USB and silently drops to a few frames per second.
+  fourcc: MJPG
+
+  # Set true if the physical left lens ends up on the right half of
+  # the frame. calibrate_stereo.py will tell you if it detects this.
+  swap_eyes: false
+
+  # V4L2 controls applied once at start-up. Empty = leave the sensor on
+  # auto, which is the safe default but NOT the best setting for SLAM.
+  #
+  # This module runs AGC/AEC/AWB automatically and has a ROLLING
+  # shutter. Two consequences:
+  #
+  #   * If the eyes drift to different exposures, the same surface has
+  #     different intensity in each image, which undermines the very
+  #     thing stereo matching relies on. Measured on this camera:
+  #     auto gave left/right mean brightness 76.5/78.1; locked gave
+  #     43.0/43.0.
+  #   * In a dim room auto exposure lengthens the shutter, and a long
+  #     shutter on a rolling-shutter sensor turns camera motion into a
+  #     sheared, blurred frame. That is the most common cause of
+  #     ORB-SLAM3 losing tracking.
+  #
+  # exposure_time_absolute is in 100 us units, so 200 = 20 ms.
+  # Start from the values below, then raise exposure until the image is
+  # bright enough, or raise gain instead (noisier, but no extra blur).
+  # Easier: run with --lock-exposure 20 to apply this automatically.
+  #
+  # controls:
+  #   auto_exposure: 1               # 1 = Manual, 3 = Aperture Priority (auto)
+  #   exposure_time_absolute: 200    # 20 ms
+  #   white_balance_automatic: 0
+  #   gain: 40
+  controls: {}
+
+
+# ------------------------------------------------------------
+# TEMPORARY visual lens model
+# ------------------------------------------------------------
+# These are the hand-tuned slider values from the Novex calibrator.
+# They are used ONLY to give a reasonable preview image before a real
+# calibration exists. They are not metric and they contain no
+# information about the relationship between the two lenses, so they
+# are never used for SLAM. See src/calibration.py.
+# ------------------------------------------------------------
+temporary_lens:
+  source_fov: 112.0
+  k1: 0.141
+  k2: 0.0135
+  k3: 0.0
+  k4: 0.003
+  center_x: 0.0
+  center_y: 0.0
+  virtual_fov: 99.0
+
+
+# ------------------------------------------------------------
+# Rectification: fisheye pair -> ideal pinhole stereo pair
+# ------------------------------------------------------------
+rectification:
+  # Size per eye handed to ORB-SLAM3.
+  #
+  # With camera_model: fisheye nothing is undistorted or cropped - this
+  # only DOWNSCALES the raw image. Kannala-Brandt distortion depends on
+  # the incidence angle, not pixel size, so scaling multiplies fx/fy/
+  # cx/cy and leaves k1..k4 untouched: the field of view is identical,
+  # just sampled less finely. Height is snapped to preserve the aspect
+  # ratio, since scaling the axes differently would change the lens
+  # model.
+  #
+  # Default is the full native eye resolution: nothing is thrown away
+  # before SLAM sees it. If ORB-SLAM3 cannot keep up on your machine,
+  # halving these is the first thing to try - it cuts ORB extraction
+  # cost roughly fourfold. Watch "SLAM FPS" in the GUI.
+  width: 1280
+  height: 720
+
+  # Horizontal field of view to keep in the rectified image, degrees.
+  #
+  # This is the setting that matters on a very wide lens. A pinhole
+  # image cannot represent 180 degrees at all (tan(90) is infinite),
+  # and letting OpenCV choose via `balance` degenerates badly: on this
+  # ~168 degree camera balance=0 returned fx = 0.0 and a nominal
+  # 180 degree field, which is not a usable image.
+  #
+  # So the rectified focal length is set explicitly to hit this FOV.
+  # 90-110 is the sensible range: lower keeps more resolution in the
+  # centre, higher sees more of the room. Set to null to fall back to
+  # OpenCV's balance/fov_scale behaviour.
+  target_hfov_deg: 100.0
+
+  # balance (0..1) trades field of view against black border.
+  #   0.0 = crop to only valid pixels, no black edges, narrower view
+  #   1.0 = keep the whole field of view, with black wedges at the
+  #         edges that ORB will waste features on
+  balance: 0.0
+
+  # fov_scale > 1 zooms out, fitting more of the fisheye view into the
+  # rectified image at the cost of resolution in the centre.
+  fov_scale: 1.0
+
+
+# ------------------------------------------------------------
+# SLAM
+# ------------------------------------------------------------
+slam:
+  # Which camera model ORB-SLAM3 is given.
+  #
+  #   fisheye   - NO rectification. The raw fisheye images go straight
+  #               in and ORB-SLAM3 applies the Kannala-Brandt model
+  #               itself (Camera.type "KannalaBrandt8", the same mode
+  #               TUM-VI uses with 195 degree lenses).
+  #
+  #               Keeps the FULL ~169 degree measured field of view
+  #               instead of the ~100 degrees a pinhole rectification
+  #               leaves. The discarded periphery is where features
+  #               move fastest under rotation, so keeping it is what
+  #               most strongly constrains the rotation estimate -
+  #               this is the setting to use if you see rotational
+  #               drift. It also skips the ~13 ms/frame remap.
+  #
+  #               Caveats, honestly: ORB-SLAM3 matches fisheye stereo
+  #               by brute-force descriptor matching with Lowe's ratio
+  #               and NO epipolar constraint, so on repetitive texture
+  #               it finds fewer stereo pairs than the rectified path.
+  #               Features outside the lens overlap carry no depth and
+  #               are tracked monocularly.
+  #
+  #   rectified - fisheye pair remapped to an ideal pinhole pair.
+  #               Narrower, resampled, slower, but stereo matching is
+  #               an epipolar row search and so is more robust.
+  #
+  # Either way this is REAL ORB-SLAM3 stereo; only the camera model
+  # differs. Both read the same measured calibration.
+  camera_model: fisheye
+
+  vocabulary: third_party/ORB_SLAM3/Vocabulary/ORBvoc.txt
+
+  # GENERATED from the calibration on every start. Do not edit.
+  settings_out: config/orbslam3_stereo.yaml
+
+  # Points nearer than th_depth * baseline are triangulated from a
+  # single stereo pair. With a short baseline (a few cm) this must be
+  # generous, or almost everything indoors is treated as "far" and
+  # ORB-SLAM3 loses the scale information stereo is there to provide.
+  th_depth: 60.0
+
+  orb:
+    # AGGRESSIVE extraction. These are deliberately far past ORB-SLAM3's
+    # defaults (1200 features, 8 levels, FAST 20/7) to pull out every
+    # usable point, at a real cost in frame rate.
+    #
+    # n_features   : the cap per image. 4000 on 1280x720 is about one
+    #                feature per 230 px^2 - dense but still sane.
+    # n_levels     : more pyramid levels catch features at more scales,
+    #                which matters in a room with both near clutter and
+    #                far walls.
+    # ini/min ThFAST: the corner-response thresholds. Lowering them is
+    #                what actually finds features on weakly textured
+    #                surfaces - painted walls, carpet, doors. Too low
+    #                and you extract image noise, which produces
+    #                unstable map points, so 10/3 is about the floor.
+    #
+    # If SLAM FPS drops too far, reduce n_features FIRST: it is close
+    # to linear in cost, whereas the FAST thresholds are what buy you
+    # coverage on bland surfaces.
+    n_features: 4000
+    scale_factor: 1.2
+    n_levels: 10
+    ini_th_fast: 10
+    min_th_fast: 3
+
+  # Plane / ground detection from the map point cloud. Runs on its own
+  # thread so it never slows tracking down.
+  planes:
+    enabled: true
+    interval_s: 1.5        # how often to re-fit
+    max_planes: 3
+    threshold_m: 0.04      # inlier band half-width
+    min_inliers: 60
+    iterations: 150
+    max_points: 3000
+
+  # How often the GUI's copy of the map is refreshed, in tracked
+  # frames. The map can hold tens of thousands of points; copying it
+  # every frame would cost more than tracking does.
+  map_update_every: 10
+
+  # ORB-SLAM3 console verbosity: 0 quiet, 1 normal, 4 debug.
+  verbosity: 1
+
+
+gui:
+  # Repaint rate. Above the camera rate this only costs CPU, since
+  # the GUI skips frames it has already drawn.
+  fps: 30
+
+
+# ------------------------------------------------------------
+# Calibration sanity limits
+# ------------------------------------------------------------
+calibration:
+  # Largest believable distance between the two lens centres, metres.
+  #
+  # Scale is NOT observable from images: the calibration measures the
+  # baseline as a multiple of your board square, and the square size
+  # you declare turns that into millimetres. Declare it wrong and every
+  # distance is wrong by the same factor, with nothing in the images to
+  # reveal it. This bound is the guard.
+  #
+  # 0.095 comes from the GXIVISION-LSM22100 being a 100 mm module. If
+  # you MEASURE a larger separation between your lens centres, raise
+  # this. Do not raise it merely to get past the check.
+  max_baseline_m: 0.095
+
+
+# ------------------------------------------------------------
+# CPU core assignment
+# ------------------------------------------------------------
+# Keeps ORB-SLAM3 off the capture thread's core. When they collide the
+# symptom is not a graceful slowdown - the capture thread gets
+# descheduled while ORB-SLAM3 optimises and frames are dropped at the
+# USB layer, gone for good.
+#
+# Thread affinity is INHERITED by child threads, and ORB-SLAM3 spawns
+# its own (LocalMapping, LoopClosing, two ORB extractors per frame).
+# Pinning the SLAM worker therefore confines all of them.
+#
+# Leave `auto: true` to split the machine sensibly for its core count
+# (core 0 = camera + GUI, the rest = SLAM). Set explicit lists to
+# override.
+cpu:
+  auto: true
+  # camera: [0]
+  # slam:   [1, 2, 3]
+  # gui:    [0]
+
+
+# ------------------------------------------------------------
+# Profiles
+# ------------------------------------------------------------
+# Selected with --profile NAME (or --fast, which is --profile fast).
+# A profile overrides keys in the sections above; anything it does not
+# mention is left alone.
+#
+# Measured on this machine with real frames from this camera:
+#
+#   profile      size       features  stereo   SLAM fps
+#   quality      1280x720   4005      1345      6.8
+#   balanced      960x540   1505       504     12.3
+#   fast          848x480   1205       405     29.0
+#   fastest       640x360    703       247     47.7
+#
+# The key insight for FAST MOVEMENT: what breaks tracking is not a low
+# feature count, it is large motion BETWEEN frames. Running at 29 fps
+# with 1200 features tracks fast motion far better than 7 fps with
+# 4000, because each frame has moved a quarter as far. Resolution is
+# the cheapest thing to trade - ORB extraction cost is roughly linear
+# in pixel count.
+profiles:
+
+  quality:
+    rectification: {width: 1280, height: 720}
+    slam:
+      orb: {n_features: 1200, n_levels: 8, ini_th_fast: 12, min_th_fast:5}
+    gui: {fps: 30}
+
+  balanced:
+    rectification: {width: 960, height: 540}
+    slam:
+      orb: {n_features: 1500, n_levels: 8, ini_th_fast: 12, min_th_fast: 5}
+    gui: {fps: 30}
+
+  fast:
+    # Matches the camera's 30 fps, so inter-frame motion stays small.
+    rectification: {width: 848, height: 480}
+    slam:
+      orb: {n_features: 1200, n_levels: 7, ini_th_fast: 12, min_th_fast: 5}
+      map_update_every: 15
+      planes: {interval_s: 3.0}
+    gui: {fps: 30}
+    # A short shutter is essential for fast motion on a ROLLING shutter
+    # sensor: a long exposure shears and blurs the frame while the
+    # camera moves, and blurred corners do not match. 8 ms needs decent
+    # light - raise `gain` rather than exposure if the image is dark.
+    exposure_ms: 8.0
+    gain: 60
+
+  fastest:
+    rectification: {width: 640, height: 360}
+    slam:
+      orb: {n_features: 700, n_levels: 5, ini_th_fast: 15, min_th_fast: 7}
+      map_update_every: 20
+      planes: {interval_s: 4.0}
+    gui: {fps: 60}
+    exposure_ms: 6.0
+    gain: 80
