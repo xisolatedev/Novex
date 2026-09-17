@@ -3,6 +3,9 @@
 #include "Log.hpp"
 #include "Time.hpp"
 
+#include <opencv2/calib3d.hpp>
+
+#include <algorithm>
 #include <cmath>
 
 namespace novex
@@ -16,6 +19,12 @@ namespace
 // estimation. Deliberately conservative: a wrong stationary call
 // poisons the bias.
 constexpr double kStationaryFlowPixels = 0.4;
+
+// Map point fusion: the fused weight is capped at this many current
+// observations, which gives the fusion a memory of roughly that many
+// frames, and range sigma never counts as better than 2 mm.
+constexpr float kFusionMemory = 25.0f;
+constexpr float kFusionSigmaFloor = 0.002f;
 
 } // namespace
 
@@ -36,6 +45,26 @@ VIO::VIO(const VIOConfig& config,
 
     stereoRuntimeEnabled = config.stereoEnabled;
     imuRuntimeEnabled = config.imuEnabled;
+
+    flowScratch.reserve(static_cast<size_t>(config.maxFeatures) + 32);
+
+    if (config.pointCloudEnabled)
+    {
+        // Every buffer the point pipeline will ever use is sized here,
+        // once. Nothing below allocates per frame or per point.
+        const size_t liveCapacity =
+            static_cast<size_t>(config.maxFeatures) + 32;
+
+        liveScratch.resize(liveCapacity);
+        innovationScratch.reserve(liveCapacity);
+
+        const size_t mapCapacity = config.pointMapEnabled
+            ? static_cast<size_t>(config.pointCloudMaxPoints)
+            : 1;
+
+        map.configure(mapCapacity, config.pointCloudVoxelSize);
+        points.configure(liveCapacity, mapCapacity);
+    }
 
     collector.start(monotonicSeconds());
 }
@@ -70,6 +99,34 @@ void VIO::apply(const Command& command)
 
             havePrevious = false;
             previousTimestamp = 0.0;
+            referenceTimestamp = 0.0;
+            referenceSpan = 0;
+            keyframeInliers = 0;
+
+            // Totals that describe "this estimate" start again; run
+            // counters of rejected work are kept, they describe the
+            // run.
+            frameDiagnostics.accumulatedRotationDeg = 0.0;
+            frameDiagnostics.accumulatedTranslationM = 0.0;
+            frameDiagnostics.netRotationDeg = 0.0;
+            frameDiagnostics.netTranslationM = 0.0;
+
+            // The map lives in the estimator's internal frame, which
+            // reset has just discarded, so its points no longer refer
+            // to anything. A new epoch tells every viewer to drop it.
+            if (config.pointCloudEnabled)
+            {
+                map.clear(monotonicSeconds());
+            }
+
+            // A running stationary window restarts at the new origin
+            // rather than attributing the reset jump to drift.
+            if (stationary.isActive())
+            {
+                stationary.start(monotonicSeconds(),
+                                 estimator.internalRotation(),
+                                 estimator.internalPosition());
+            }
 
             ++resets;
 
@@ -110,8 +167,11 @@ void VIO::apply(const Command& command)
 
                 // Drop the temporal link. The previous frame is now
                 // arbitrarily old, and asking KLT to match across
-                // that gap would produce confident nonsense.
+                // that gap would produce confident nonsense. The
+                // motion reference restarts with it.
                 havePrevious = false;
+                referenceSpan = 0;
+                keyframeInliers = 0;
 
                 LOG_INFO("vio: resumed");
             }
@@ -127,6 +187,39 @@ void VIO::apply(const Command& command)
                 "vio: stereo depth %s",
                 command.flag ? "enabled" : "disabled"
             );
+
+            break;
+        }
+
+        case CommandType::StationaryTest:
+        {
+            if (command.flag)
+            {
+                stationary.start(estimator.state().timestamp,
+                                 estimator.internalRotation(),
+                                 estimator.internalPosition());
+
+                LOG_INFO(
+                    "vio: stationary test started - keep the camera "
+                    "still; motion is measured, never suppressed"
+                );
+            }
+            else if (stationary.isActive())
+            {
+                stationary.stop();
+                LOG_INFO("vio: stationary test stopped");
+            }
+
+            break;
+        }
+
+        case CommandType::ClearMap:
+        {
+            if (config.pointCloudEnabled)
+            {
+                map.clear(monotonicSeconds());
+                LOG_INFO("vio: point map cleared, tracking untouched");
+            }
 
             break;
         }
@@ -185,6 +278,20 @@ bool VIO::initialise(const cv::Size& size)
 
     havePrevious = false;
     previousTimestamp = 0.0;
+    referenceTimestamp = 0.0;
+    referenceSpan = 0;
+
+    if (config.stationaryTestEnabled)
+    {
+        stationary.start(monotonicSeconds(),
+                         estimator.internalRotation(),
+                         estimator.internalPosition());
+
+        LOG_INFO(
+            "vio: stationary test enabled from start-up - keep the "
+            "camera still; motion is measured, never suppressed"
+        );
+    }
 
     initialised = true;
 
@@ -245,9 +352,43 @@ bool VIO::process(const cv::Mat& left,
         }
     }
 
-    const double deltaTime = havePrevious
-        ? timestamp - previousTimestamp
+    // Time since the motion REFERENCE frame, which is what the visual
+    // estimate actually spans. It is the previous frame's interval
+    // except after rejected frames.
+    const double referenceDelta = havePrevious
+        ? timestamp - referenceTimestamp
         : 0.0;
+
+    // Fresh per-frame record; run totals carried from the last frame.
+    {
+        const FrameDiagnostics last = frameDiagnostics;
+
+        frameDiagnostics = FrameDiagnostics();
+
+        frameDiagnostics.motionRejectedTotal = last.motionRejectedTotal;
+        frameDiagnostics.referenceResetsTotal = last.referenceResetsTotal;
+        frameDiagnostics.stereoRejectedTotal = last.stereoRejectedTotal;
+        frameDiagnostics.correspondencesRejectedTotal =
+            last.correspondencesRejectedTotal;
+        frameDiagnostics.accumulatedRotationDeg =
+            last.accumulatedRotationDeg;
+        frameDiagnostics.accumulatedTranslationM =
+            last.accumulatedTranslationM;
+    }
+
+    frameDiagnostics.timestamp = timestamp;
+
+    const Eigen::Vector3d publishedPositionBefore =
+        estimator.state().position;
+
+    const Eigen::Matrix3d internalRotationBefore =
+        estimator.internalRotation();
+
+    const Eigen::Vector3d internalPositionBefore =
+        estimator.internalPosition();
+
+    const Eigen::Quaterniond publishedOrientationBefore =
+        estimator.state().orientation;
 
     // Collect the IMU samples that fall in this frame interval. Doing
     // this by timestamp rather than by count is the whole point of
@@ -269,15 +410,22 @@ bool VIO::process(const cv::Mat& left,
     if (havePrevious)
     {
         tracker.track(previousLeft, left, timings);
+
+        frameDiagnostics.trackRejected = tracker.lastDropped();
+
+        measureFlow();
+
+        ++referenceSpan;
     }
 
     bool tracked = false;
+    bool newKeyframe = false;
 
-    if (havePrevious && deltaTime > 0.0)
+    if (havePrevious && referenceDelta > 0.0)
     {
         const MotionResult result = motion.estimate(
             tracker.features(),
-            deltaTime,
+            referenceDelta,
             timings
         );
 
@@ -285,7 +433,10 @@ bool VIO::process(const cv::Mat& left,
         {
             ScopedStage stateTiming(timings, Stage::State);
 
-            estimator.applyMotion(result, timestamp, deltaTime);
+            newKeyframe = keyframeDue(result);
+
+            estimator.applyMotion(result, timestamp, referenceDelta,
+                                  newKeyframe);
             tracked = true;
         }
         else
@@ -297,13 +448,17 @@ bool VIO::process(const cv::Mat& left,
             LOG_EVERY(
                 LogLevel::Warn,
                 2.0,
-                "vio: motion estimation failed (%s), %d features with "
-                "depth, %d inliers",
+                "vio: motion estimate rejected (%s), %d features with "
+                "reference depth, %d inliers",
                 result.failureReason ? result.failureReason : "unknown",
                 result.correspondences,
                 result.inliers
             );
         }
+
+        fillMotionDiagnostics(result,
+                              internalRotationBefore,
+                              internalPositionBefore);
 
         estimator.updateBiases(imuSamples, isVisuallyStationary());
     }
@@ -314,18 +469,48 @@ bool VIO::process(const cv::Mat& left,
         estimator.applyTrackingLoss(imuSamples, timestamp);
     }
 
-    // Top up features and give them depth for the NEXT frame's motion
-    // estimate. Detection runs before stereo so that new features get
-    // depth immediately rather than sitting idle for a frame.
+    // Top up features and give them depth. Detection runs before
+    // stereo so that new features get depth immediately rather than
+    // sitting idle for a frame.
     tracker.detect(left, timings);
+
+    frameDiagnostics.detectedFeatures = tracker.lastDetected();
 
     if (stereoRuntimeEnabled)
     {
         stereo.compute(left, right, tracker.features(), timings);
+
+        const StereoMatcher::Stats& s = stereo.stats();
+
+        frameDiagnostics.stereoValid = true;
+        frameDiagnostics.stereoAttempted = s.attempted;
+        frameDiagnostics.stereoPoints = s.triangulated;
+        frameDiagnostics.stereoRejected = s.attempted - s.triangulated;
+        frameDiagnostics.stereoRejectedMatch = s.rejectedMatch;
+        frameDiagnostics.stereoRejectedEpipolar = s.rejectedEpipolar;
+        frameDiagnostics.stereoRejectedDepth = s.rejectedDepth;
+        frameDiagnostics.disparityMedianPx = s.disparityMedianPx;
+        frameDiagnostics.disparityStdPx = s.disparityStdPx;
+        frameDiagnostics.depthMedian = s.depthMedian;
+        frameDiagnostics.depthMin = s.depthMin;
+        frameDiagnostics.depthMax = s.depthMax;
+        frameDiagnostics.depthStd = s.depthStd;
+        frameDiagnostics.stereoResidualMedianPx = s.residualMedianPx;
+        frameDiagnostics.stereoVerticalOffsetPx = s.verticalOffsetMeanPx;
+
+        frameDiagnostics.stereoRejectedTotal +=
+            static_cast<uint64_t>(std::max(0, frameDiagnostics.stereoRejected));
     }
     else
     {
         stereo.clearDepth(tracker.features());
+    }
+
+    updateReferences(tracked, newKeyframe, timestamp);
+
+    if (config.pointCloudEnabled)
+    {
+        buildPointCloud(left, tracked, timestamp);
     }
 
     previousLeft = left;
@@ -342,6 +527,40 @@ bool VIO::process(const cv::Mat& left,
 
     state.imuHealthy = state.imuEnabled && imu->isRunning();
     ++state.frameId;
+
+    frameDiagnostics.frameId = state.frameId;
+    frameDiagnostics.trackedFeatures = state.trackedFeatures;
+
+    for (int k = 0; k < 3; ++k)
+    {
+        frameDiagnostics.velocity[k] = state.velocity(k);
+    }
+
+    frameDiagnostics.speed = state.velocity.norm();
+
+    frameDiagnostics.poseDeltaM =
+        (state.position - publishedPositionBefore).norm();
+
+    frameDiagnostics.poseDeltaDeg =
+        publishedOrientationBefore.angularDistance(state.orientation) *
+        57.29577951308232;
+
+    frameDiagnostics.netRotationDeg =
+        Eigen::AngleAxisd(estimator.internalRotation()).angle() *
+        57.29577951308232;
+
+    frameDiagnostics.netTranslationM = estimator.internalPosition().norm();
+
+    frameDiagnostics.keyframesTotal = keyframes;
+
+    stationary.update(frameDiagnostics,
+                      estimator.internalRotation(),
+                      estimator.internalPosition());
+
+    if (frameDiagnostics.keyframeCreated)
+    {
+        stationary.noteKeyframe();
+    }
 
     const double now = monotonicSeconds();
 
@@ -361,9 +580,464 @@ bool VIO::process(const cv::Mat& left,
         tracked
     );
 
+    collector.noteGeometry(frameDiagnostics);
+
     publish();
 
     return tracked;
+}
+
+void VIO::measureFlow()
+{
+    const std::vector<Feature>& features = tracker.features();
+
+    flowScratch.clear();
+
+    double sum = 0.0;
+
+    for (const Feature& feature : features)
+    {
+        const cv::Point2f flow = feature.point - feature.previousPoint;
+        const double magnitude = std::sqrt(flow.x * flow.x + flow.y * flow.y);
+
+        flowScratch.push_back(magnitude);
+        sum += magnitude;
+    }
+
+    if (flowScratch.empty())
+    {
+        return;
+    }
+
+    const size_t middle = flowScratch.size() / 2;
+
+    std::nth_element(flowScratch.begin(),
+                     flowScratch.begin() + static_cast<long>(middle),
+                     flowScratch.end());
+
+    frameDiagnostics.flowMedianPx = flowScratch[middle];
+    frameDiagnostics.flowMeanPx = sum / static_cast<double>(flowScratch.size());
+}
+
+void VIO::fillMotionDiagnostics(const MotionResult& result,
+                                const Eigen::Matrix3d& previousRotation,
+                                const Eigen::Vector3d& previousPosition)
+{
+    FrameDiagnostics& d = frameDiagnostics;
+
+    d.motionAttempted = result.attempted;
+    d.motionAccepted = result.success;
+    d.motionRejectReason = result.success ? nullptr : result.failureReason;
+    d.correspondences = result.correspondences;
+    d.inliers = result.inliers;
+    d.inlierRatio = result.inlierRatio;
+    d.reprojectionMedianPx = result.reprojectionMedianPx;
+    d.reprojectionMaxPx = result.reprojectionMaxPx;
+    d.rotationSigmaDeg = result.rotationSigmaDeg;
+    d.translationSigmaMm = result.translationSigmaMm;
+    d.conditioning = result.conditioning;
+    d.referenceSpanFrames = referenceSpan;
+
+    if (result.attempted)
+    {
+        d.rejectedCorrespondences =
+            std::max(0, result.correspondences - result.inliers);
+
+        d.correspondencesRejectedTotal +=
+            static_cast<uint64_t>(d.rejectedCorrespondences);
+    }
+
+    if (!result.success)
+    {
+        ++d.motionRejectedTotal;
+        return;
+    }
+
+    // Relative motion is reported PER FRAME, whatever the estimate was
+    // measured against: the change of the internal pose since the last
+    // frame, expressed in that frame's camera axes. The camera rotated
+    // by R_prev^T R_now and moved by R_prev^T (p_now - p_prev).
+    const Eigen::Matrix3d& rotationNow = estimator.internalRotation();
+    const Eigen::Vector3d& positionNow = estimator.internalPosition();
+
+    const Eigen::AngleAxisd rotation(previousRotation.transpose() * rotationNow);
+    const Eigen::Vector3d rotationVector = rotation.axis() * rotation.angle();
+
+    const Eigen::Vector3d displacement =
+        previousRotation.transpose() * (positionNow - previousPosition);
+
+    for (int k = 0; k < 3; ++k)
+    {
+        d.relativeRotationVector[k] = rotationVector(k);
+        d.relativeTranslation[k] = displacement(k);
+    }
+
+    d.relativeRotationDeg = rotation.angle() * 57.29577951308232;
+    d.relativeTranslationM = displacement.norm();
+
+    // Raw estimate against the keyframe, as camera motion: R^T and
+    // -R^T t in keyframe axes.
+    const cv::Matx33d cameraRotation = result.rotation.t();
+    const cv::Vec3d cameraDisplacement = -(cameraRotation * result.translation);
+
+    cv::Vec3d estimateVector;
+    cv::Rodrigues(cameraRotation, estimateVector);
+
+    for (int k = 0; k < 3; ++k)
+    {
+        d.estimateRotationVector[k] = estimateVector[k];
+        d.estimateTranslation[k] = cameraDisplacement[k];
+    }
+
+    d.accumulatedRotationDeg += d.relativeRotationDeg;
+    d.accumulatedTranslationM += d.relativeTranslationM;
+}
+
+bool VIO::keyframeDue(const MotionResult& result)
+{
+    if (config.keyframeRetention <= 0.0)
+    {
+        return true;   // frame-to-frame
+    }
+
+    // The first estimate against a keyframe sets its baseline: how many
+    // inliers it can support when fresh.
+    if (keyframeInliers == 0)
+    {
+        keyframeInliers = result.inliers;
+    }
+
+    // Retention falls as tracks from the keyframe are lost or drift out
+    // of the inlier set. Below the threshold, a fresh keyframe with
+    // today's depths and today's features serves better.
+    const double retention =
+        static_cast<double>(result.inliers) / keyframeInliers;
+
+    return retention < config.keyframeRetention ||
+           referenceSpan >= config.keyframeMaxSpan;
+}
+
+void VIO::updateReferences(bool motionAccepted, bool newKeyframe,
+                           double timestamp)
+{
+    std::vector<Feature>& features = tracker.features();
+
+    // A new keyframe was decided with an accepted estimate - or no
+    // estimate is possible yet, on the first frame after start, reset
+    // or resume. Either way THIS frame's depths become the reference.
+    bool advance = newKeyframe || referenceSpan == 0;
+
+    // Whether the estimator's reference pose must be moved here, as
+    // opposed to having been moved by applyMotion already.
+    bool reanchorPose = referenceSpan == 0;
+
+    if (!advance)
+    {
+        // Keeping the keyframe: nothing to do unless too few features
+        // still carry its depth for any estimate to succeed.
+        int carrying = 0;
+
+        for (const Feature& feature : features)
+        {
+            carrying += feature.hasReference ? 1 : 0;
+        }
+
+        if (carrying < std::max(6, config.minInliersForTracking))
+        {
+            advance = true;
+            reanchorPose = true;
+
+            if (!motionAccepted)
+            {
+                // The pose here is carried forward, not measured, so
+                // the motion since the keyframe is genuinely lost.
+                ++frameDiagnostics.referenceResetsTotal;
+
+                LOG_EVERY(
+                    LogLevel::Warn,
+                    2.0,
+                    "vio: only %d features carry reference depth; "
+                    "re-anchoring at the current frame (motion over the "
+                    "last %d frame(s) is unmeasured)",
+                    carrying,
+                    referenceSpan
+                );
+            }
+        }
+    }
+
+    if (!advance)
+    {
+        return;
+    }
+
+    for (Feature& feature : features)
+    {
+        feature.hasReference = feature.hasDepth;
+        feature.reference3D = feature.position3D;
+    }
+
+    if (reanchorPose)
+    {
+        estimator.reanchorReference();
+    }
+
+    referenceTimestamp = timestamp;
+    referenceSpan = 0;
+    keyframeInliers = 0;
+
+    ++keyframes;
+
+    frameDiagnostics.keyframeCreated = true;
+}
+
+void VIO::buildPointCloud(const cv::Mat& left, bool poseValid,
+                          double timestamp)
+{
+    ScopedStage timing(timings, Stage::PointCloud);
+
+    const Eigen::Matrix3d& rotation = estimator.internalRotation();
+    const Eigen::Vector3d& position = estimator.internalPosition();
+
+    const Eigen::Matrix3f rotationF = rotation.cast<float>();
+    const Eigen::Vector3f positionF = position.cast<float>();
+
+    std::vector<Feature>& features = tracker.features();
+
+    size_t liveCount = 0;
+
+    innovationScratch.clear();
+
+    const int maxX = left.cols - 1;
+    const int maxY = left.rows - 1;
+
+    for (Feature& feature : features)
+    {
+        if (!feature.hasDepth || liveCount >= liveScratch.size())
+        {
+            continue;
+        }
+
+        ++pointTotals.generated;
+
+        LivePoint& p = liveScratch[liveCount++];
+
+        p.position[0] = feature.position3D.x;
+        p.position[1] = feature.position3D.y;
+        p.position[2] = feature.position3D.z;
+        p.featureId = static_cast<uint32_t>(feature.id & 0xffffffffu);
+        p.depth = feature.position3D.z;
+        p.depthSigma = feature.depthSigma;
+        p.stereoResidualPx = feature.stereoResidualPx;
+        p.age = static_cast<uint8_t>(std::min(feature.age, 255));
+
+        const int px = std::min(maxX, std::max(0,
+            static_cast<int>(std::lround(feature.point.x))));
+        const int py = std::min(maxY, std::max(0,
+            static_cast<int>(std::lround(feature.point.y))));
+
+        p.intensity = left.at<uint8_t>(py, px);
+
+        p.quality = pointQuality(
+            feature.depthSigma,
+            feature.stereoResidualPx,
+            feature.motionInlier,
+            config.pointCloudMaxDepthSigma,
+            config.pointCloudMaxStereoResidualPx
+        );
+
+        p.flags = feature.motionInlier ? LiveFlagMotionInlier : 0;
+
+        // ---- map gates ----
+        //
+        // Each rejection is counted by reason. They exist so the MAP
+        // is made of trustworthy geometry; the live view shows every
+        // point regardless, because it is also a diagnostic.
+        if (!config.pointMapEnabled)
+        {
+            continue;
+        }
+
+        if (!poseValid)
+        {
+            // Without an accepted motion estimate this frame, the pose
+            // is carried forward rather than measured, and a world
+            // point built from it would be placed with a stale pose.
+            ++pointTotals.rejectedNoPose;
+            continue;
+        }
+
+        if (feature.position3D.z > config.pointCloudMaxDepth)
+        {
+            ++pointTotals.rejectedDepth;
+            continue;
+        }
+
+        if (feature.depthSigma > config.pointCloudMaxDepthSigma)
+        {
+            ++pointTotals.rejectedUncertainty;
+            continue;
+        }
+
+        if (feature.stereoResidualPx > config.pointCloudMaxStereoResidualPx)
+        {
+            ++pointTotals.rejectedResidual;
+            continue;
+        }
+
+        if (feature.age < config.pointCloudMinTrackAge)
+        {
+            ++pointTotals.rejectedTrackAge;
+            continue;
+        }
+
+        if (config.pointCloudRequireInlier && !feature.motionInlier)
+        {
+            ++pointTotals.rejectedNotInlier;
+            continue;
+        }
+
+        p.flags |= LiveFlagMapEligible;
+
+        ++pointTotals.accepted;
+
+        // P_world = R_wc * P_camera + p_wc, with the pose of THIS frame.
+        const Eigen::Vector3f world =
+            rotationF * Eigen::Vector3f(p.position[0],
+                                        p.position[1],
+                                        p.position[2]) + positionF;
+
+        // ---- fuse repeated observations of this track ----
+        //
+        // Range noise lies ALONG the viewing ray, so independent
+        // observations of one feature scatter into a streak. Fusing
+        // them by inverse range variance turns the streak into one
+        // point whose error shrinks as it is re-observed. The weight is
+        // bounded to ~kFusionMemory observations, so a point can still
+        // follow a slowly drifting pose instead of freezing on old data.
+        const float range = Eigen::Vector3f(p.position[0], p.position[1],
+                                            p.position[2]).norm();
+
+        const float rangeSigma = std::max(
+            feature.depthSigma * range, kFusionSigmaFloor
+        );
+
+        const float weight = 1.0f / (rangeSigma * rangeSigma);
+
+        if (feature.fusedWeight > 0.0f)
+        {
+            const Eigen::Vector3f fused(feature.fusedWorld[0],
+                                        feature.fusedWorld[1],
+                                        feature.fusedWorld[2]);
+
+            // How far this observation lands from what the track
+            // already said, as a fraction of range: stereo repeatability
+            // plus pose consistency, measured.
+            innovationScratch.push_back((world - fused).norm() / range);
+
+            const float total = feature.fusedWeight + weight;
+            const Eigen::Vector3f updated =
+                (fused * feature.fusedWeight + world * weight) / total;
+
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                feature.fusedWorld[axis] = updated(axis);
+            }
+
+            feature.fusedWeight = std::min(total, weight * kFusionMemory);
+        }
+        else
+        {
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                feature.fusedWorld[axis] = world(axis);
+            }
+
+            feature.fusedWeight = weight;
+        }
+
+        feature.mapSlot = map.upsertTrack(
+            feature.mapSlot,
+            feature.id,
+            Eigen::Vector3f(feature.fusedWorld[0], feature.fusedWorld[1],
+                            feature.fusedWorld[2]),
+            p.quality,
+            p.intensity,
+            timestamp,
+            pointTotals
+        );
+    }
+
+    if (!innovationScratch.empty())
+    {
+        const size_t middle = innovationScratch.size() / 2;
+
+        std::nth_element(innovationScratch.begin(),
+                         innovationScratch.begin() + static_cast<long>(middle),
+                         innovationScratch.end());
+
+        frameDiagnostics.mapInnovationMedianPct =
+            innovationScratch[middle] * 100.0;
+        frameDiagnostics.mapInnovationSamples =
+            static_cast<int>(innovationScratch.size());
+    }
+
+    collector.notePoints(liveScratch.data(), liveCount,
+                         config.pointMapEnabled ? map.size() : 0);
+
+    const double now = monotonicSeconds();
+
+    if (lastPointPublish >= 0.0 &&
+        now - lastPointPublish < 1.0 / config.pointCloudPublishHz)
+    {
+        return;
+    }
+
+    PointPose pose;
+    PointPose origin;
+
+    const Eigen::Matrix3d& originR = estimator.originRotationMatrix();
+    const Eigen::Vector3d& originP = estimator.originPositionVector();
+
+    for (int row = 0; row < 3; ++row)
+    {
+        for (int col = 0; col < 3; ++col)
+        {
+            pose.rotation[row * 3 + col] =
+                static_cast<float>(rotation(row, col));
+            origin.rotation[row * 3 + col] =
+                static_cast<float>(originR(row, col));
+        }
+
+        pose.position[row] = static_cast<float>(position(row));
+        origin.position[row] = static_cast<float>(originP(row));
+    }
+
+    const uint64_t frameId = estimator.state().frameId + 1;
+
+    // Both use try_lock. If the server is mid-read, this frame's
+    // snapshot is simply skipped - the map's dirty list is kept, so
+    // nothing is lost, only delayed to the next frame.
+    const bool liveDone = points.tryPublishLive(
+        timestamp, frameId, pose, origin, liveScratch.data(), liveCount
+    );
+
+    bool mapDone = true;
+
+    if (config.pointMapEnabled)
+    {
+        mapDone = points.tryPublishMap(map, timestamp, frameId, pose, origin);
+
+        if (mapDone)
+        {
+            map.clearDirty();
+        }
+    }
+
+    if (liveDone && mapDone)
+    {
+        lastPointPublish = now;
+    }
 }
 
 bool VIO::isVisuallyStationary() const
@@ -441,6 +1115,23 @@ void VIO::publish()
     fresh.resetCount = resets;
     fresh.recenterCount = estimator.recenterCount();
     fresh.originRecentered = estimator.hasOrigin();
+
+    fresh.diagnostics = frameDiagnostics;
+    fresh.stationary = stationary.report();
+
+    fresh.pointCloudEnabled = config.pointCloudEnabled;
+    fresh.pointMapEnabled = config.pointCloudEnabled && config.pointMapEnabled;
+    fresh.livePoints = static_cast<size_t>(
+        std::max(0, frameDiagnostics.stereoPoints));
+    fresh.mapPoints = config.pointMapEnabled ? map.size() : 0;
+    fresh.mapCapacity = config.pointMapEnabled ? map.capacity() : 0;
+    fresh.voxelSize = map.voxelSize();
+    fresh.mapEpoch = map.epoch();
+    fresh.pointCounters = pointTotals;
+
+    fresh.originOrientation =
+        Eigen::Quaterniond(estimator.originRotationMatrix());
+    fresh.originPosition = estimator.originPositionVector();
 
     if (imu != nullptr)
     {

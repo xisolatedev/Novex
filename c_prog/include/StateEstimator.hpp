@@ -68,10 +68,55 @@ public:
     bool gyroRotation(const std::vector<IMUSample>& samples,
                       cv::Matx33d& rotation) const;
 
-    // Applies a successful visual motion estimate.
+    // Applies a successful visual motion estimate. The motion is
+    // relative to the REFERENCE pose (the pose at the last accepted
+    // estimate), not to whatever the published pose currently is, so
+    // an estimate that spans rejected frames composes onto the frame
+    // its 3D points were actually measured in. `deltaTime` is the time
+    // since that reference.
+    //
+    // `advanceReference` makes the resulting pose the new reference -
+    // true for frame-to-frame operation, and whenever a new keyframe is
+    // created. While it stays false, successive estimates all compose
+    // onto the same keyframe pose, so their errors do not accumulate.
     void applyMotion(const MotionResult& motion,
                      double timestamp,
-                     double deltaTime);
+                     double deltaTime,
+                     bool advanceReference = true);
+
+    // Moves the reference to the current pose without a measurement.
+    // Used when the features that carried reference depth are gone and
+    // the pipeline has to start linking from the current frame; the
+    // motion during the gap is then genuinely unmeasured, and the
+    // caller counts it as such.
+    void reanchorReference();
+
+    // The pose the estimator integrates in, before the recenter origin
+    // is applied: X_internal = internalRotation * X_camera +
+    // internalPosition. The point map is stored in this frame, so it
+    // survives recenter unchanged.
+    const Eigen::Matrix3d& internalRotation() const
+    {
+        return worldFromCamera;
+    }
+
+    const Eigen::Vector3d& internalPosition() const
+    {
+        return positionInWorld;
+    }
+
+    // The reporting origin inside the internal frame. Identity until
+    // recenter(). X_reported = originRotation^T (X_internal -
+    // originPosition).
+    const Eigen::Matrix3d& originRotationMatrix() const
+    {
+        return originRotation;
+    }
+
+    const Eigen::Vector3d& originPositionVector() const
+    {
+        return originPosition;
+    }
 
     // Called when vision failed for this frame. If the IMU is
     // available, orientation is propagated with the gyro; position is
@@ -105,6 +150,10 @@ private:
     // ever rewrites it, which is what makes recentring free.
     Eigen::Matrix3d worldFromCamera = Eigen::Matrix3d::Identity();
     Eigen::Vector3d positionInWorld = Eigen::Vector3d::Zero();
+
+    // Pose of the frame the current reference depths were measured in.
+    Eigen::Matrix3d referenceRotation = Eigen::Matrix3d::Identity();
+    Eigen::Vector3d referencePosition = Eigen::Vector3d::Zero();
 
     // The frame results are REPORTED in. Identity until recenter().
     Eigen::Matrix3d originRotation = Eigen::Matrix3d::Identity();

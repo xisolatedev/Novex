@@ -19,6 +19,125 @@ DebugCollector::DebugCollector(bool enabled)
     : enabled(enabled)
 {
     published.enabled = enabled;
+
+    disparityHistogram.bucketWidth = 0.1;
+    reprojectionHistogram.bucketWidth = 0.005;
+    pointDepthHistogram.bucketWidth = 0.05;
+}
+
+void DebugCollector::Histogram::add(double value)
+{
+    if (!std::isfinite(value))
+    {
+        return;
+    }
+
+    const int last = static_cast<int>(sizeof(buckets) / sizeof(buckets[0])) - 1;
+
+    const int index = std::min(
+        last, std::max(0, static_cast<int>(value / bucketWidth))
+    );
+
+    ++buckets[index];
+    ++samples;
+}
+
+double DebugCollector::Histogram::median() const
+{
+    if (samples == 0)
+    {
+        return 0.0;
+    }
+
+    const uint64_t target = (samples + 1) / 2;
+
+    uint64_t seen = 0;
+
+    const int total = static_cast<int>(sizeof(buckets) / sizeof(buckets[0]));
+
+    for (int i = 0; i < total; ++i)
+    {
+        seen += buckets[i];
+
+        if (seen >= target)
+        {
+            return (i + 0.5) * bucketWidth;
+        }
+    }
+
+    return total * bucketWidth;
+}
+
+void DebugCollector::noteGeometry(const FrameDiagnostics& frame)
+{
+    if (!enabled)
+    {
+        return;
+    }
+
+    lastGeometry = frame;
+
+    if (frame.trackedFeatures > 0 && frame.frameId > 1)
+    {
+        flowSum += frame.flowMedianPx;
+        ++flowFrames;
+    }
+
+    if (frame.stereoValid && frame.stereoPoints > 0)
+    {
+        ++geometryFrames;
+
+        disparitySum += frame.disparityMedianPx;
+        depthSum += frame.depthMedian;
+        stereoResidualSum += frame.stereoResidualMedianPx;
+        stereoVerticalSum += frame.stereoVerticalOffsetPx;
+
+        disparityHistogram.add(frame.disparityMedianPx);
+    }
+
+    if (frame.mapInnovationSamples > 0)
+    {
+        ++innovationFrames;
+        innovationSum += frame.mapInnovationMedianPct;
+    }
+
+    if (frame.motionAccepted)
+    {
+        ++motionFrames;
+
+        reprojectionSum += frame.reprojectionMedianPx;
+        inlierRatioSum += frame.inlierRatio;
+        inlierSum += frame.inliers;
+        relativeRotationSum += frame.relativeRotationDeg;
+        relativeTranslationSum += frame.relativeTranslationM * 1e3;
+        rotationSigmaSum += frame.rotationSigmaDeg;
+        translationSigmaSum += frame.translationSigmaMm;
+
+        reprojectionHistogram.add(frame.reprojectionMedianPx);
+    }
+}
+
+void DebugCollector::notePoints(const LivePoint* points, size_t count,
+                                size_t mapSize)
+{
+    if (!enabled)
+    {
+        return;
+    }
+
+    for (size_t i = 0; i < count; ++i)
+    {
+        const double depth = points[i].depth;
+
+        pointDepthSum += depth;
+        pointDepthMax = std::max(pointDepthMax, depth);
+        pointDepthHistogram.add(depth);
+    }
+
+    pointDepthCount += count;
+
+    mapSizeNow = mapSize;
+    mapSizePeak = std::max(mapSizePeak, mapSize);
 }
 
 void DebugCollector::start(double now)
@@ -291,6 +410,51 @@ DebugStatistics DebugCollector::finalise(double now) const
     final.imuSamples = imuSampleCount;
     final.trajectoryDistanceMeters = trajectoryDistance;
     final.position = lastPosition;
+
+    auto mean = [](double sum, uint64_t n)
+    {
+        return n ? sum / static_cast<double>(n) : 0.0;
+    };
+
+    final.geometryFrames = geometryFrames;
+    final.averageDisparityPx = mean(disparitySum, geometryFrames);
+    final.medianDisparityPx = disparityHistogram.median();
+    final.averageDepthM = mean(depthSum, geometryFrames);
+    final.averageStereoResidualPx = mean(stereoResidualSum, geometryFrames);
+    final.averageStereoVerticalOffsetPx =
+        mean(stereoVerticalSum, geometryFrames);
+
+    final.motionFrames = motionFrames;
+    final.averageReprojectionPx = mean(reprojectionSum, motionFrames);
+    final.medianReprojectionPx = reprojectionHistogram.median();
+    final.averageInlierRatio = mean(inlierRatioSum, motionFrames);
+    final.averageInliers = mean(inlierSum, motionFrames);
+    final.averageRelativeRotationDeg = mean(relativeRotationSum, motionFrames);
+    final.averageRelativeTranslationMm =
+        mean(relativeTranslationSum, motionFrames);
+    final.averageRotationSigmaDeg = mean(rotationSigmaSum, motionFrames);
+    final.averageTranslationSigmaMm = mean(translationSigmaSum, motionFrames);
+    final.averageFlowPx = mean(flowSum, flowFrames);
+
+    final.motionRejected = lastGeometry.motionRejectedTotal;
+    final.referenceResets = lastGeometry.referenceResetsTotal;
+    final.stereoRejected = lastGeometry.stereoRejectedTotal;
+    final.correspondencesRejected =
+        lastGeometry.correspondencesRejectedTotal;
+
+    final.accumulatedRotationDeg = lastGeometry.accumulatedRotationDeg;
+    final.accumulatedTranslationM = lastGeometry.accumulatedTranslationM;
+    final.netRotationDeg = lastGeometry.netRotationDeg;
+    final.netTranslationM = lastGeometry.netTranslationM;
+
+    final.pointDepthSamples = pointDepthCount;
+    final.averagePointDepthM = mean(pointDepthSum, pointDepthCount);
+    final.medianPointDepthM = pointDepthHistogram.median();
+    final.maxPointDepthM = pointDepthMax;
+    final.innovationFrames = innovationFrames;
+    final.averageInnovationPct = mean(innovationSum, innovationFrames);
+    final.mapPoints = mapSizeNow;
+    final.mapPeakPoints = mapSizePeak;
 
     // Overall rate across the whole run, rather than the smoothed
     // instantaneous rate the Profiler tracks.

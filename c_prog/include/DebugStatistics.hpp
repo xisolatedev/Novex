@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Diagnostics.hpp"
+#include "PointCloud.hpp"
 #include "Profiler.hpp"
 #include "VIOState.hpp"
 
@@ -74,6 +76,54 @@ struct DebugStatistics
 
     double trajectoryDistanceMeters = 0.0;
 
+    // ---- geometry, averaged over frames that measured it ----
+    uint64_t geometryFrames = 0;
+    double averageDisparityPx = 0.0;     // mean of per-frame medians
+    double medianDisparityPx = 0.0;      // median of per-frame medians
+    double averageDepthM = 0.0;          // mean of per-frame medians
+    double averageStereoResidualPx = 0.0;
+    double averageStereoVerticalOffsetPx = 0.0;
+
+    uint64_t motionFrames = 0;           // accepted estimates
+    double averageReprojectionPx = 0.0;  // mean of per-frame medians
+    double medianReprojectionPx = 0.0;   // median of per-frame medians
+    double averageInlierRatio = 0.0;
+    double averageInliers = 0.0;
+    double averageRelativeRotationDeg = 0.0;
+    double averageRelativeTranslationMm = 0.0;
+    double averageRotationSigmaDeg = 0.0;
+    double averageTranslationSigmaMm = 0.0;
+    double averageFlowPx = 0.0;          // mean of per-frame medians
+
+    uint64_t motionRejected = 0;
+    uint64_t referenceResets = 0;
+    uint64_t stereoRejected = 0;
+    uint64_t correspondencesRejected = 0;
+
+    // ---- drift ----
+    double accumulatedRotationDeg = 0.0;
+    double accumulatedTranslationM = 0.0;
+    double netRotationDeg = 0.0;
+    double netTranslationM = 0.0;
+
+    // Copied in from the live snapshot at exit.
+    StationaryReport stationary;
+
+    // ---- point cloud ----
+    bool pointCloudEnabled = false;
+    bool pointMapEnabled = false;
+    PointCloudCounters pointCounters;
+    uint64_t pointDepthSamples = 0;
+    double averagePointDepthM = 0.0;
+    double medianPointDepthM = 0.0;
+    double maxPointDepthM = 0.0;
+    uint64_t innovationFrames = 0;
+    double averageInnovationPct = 0.0;   // mean of per-frame medians
+    size_t mapPoints = 0;
+    size_t mapPeakPoints = 0;
+    size_t mapCapacity = 0;
+    double voxelSize = 0.0;
+
     Eigen::Vector3d position = Eigen::Vector3d::Zero();
     Eigen::Quaterniond orientation = Eigen::Quaterniond::Identity();
 
@@ -116,6 +166,13 @@ public:
     void noteFailedFrame();
     void noteImuSamples(size_t count);
 
+    // Geometry of one processed frame. VIO thread only.
+    void noteGeometry(const FrameDiagnostics& frame);
+
+    // Depths of this frame's live stereo points, and the map size.
+    void notePoints(const LivePoint* points, size_t count,
+                    size_t mapSize);
+
     // Thread-safe copy of the current summary.
     DebugStatistics snapshot() const;
 
@@ -156,6 +213,51 @@ private:
     bool havePosition = false;
 
     uint32_t histogram[BucketCount + 1] = {};
+
+    // Fixed-bucket histograms for run medians of geometry. Same idea
+    // as the frame-time histogram: O(1) per sample, medians at exit.
+    struct Histogram
+    {
+        double bucketWidth = 1.0;
+        uint32_t buckets[1024] = {};
+        uint64_t samples = 0;
+
+        void add(double value);
+        double median() const;
+    };
+
+    Histogram disparityHistogram;       // 0.1 px buckets
+    Histogram reprojectionHistogram;    // 0.005 px buckets
+    Histogram pointDepthHistogram;      // 0.05 m buckets
+
+    uint64_t geometryFrames = 0;
+    double disparitySum = 0.0;
+    double depthSum = 0.0;
+    double stereoResidualSum = 0.0;
+    double stereoVerticalSum = 0.0;
+
+    uint64_t motionFrames = 0;
+    double reprojectionSum = 0.0;
+    double inlierRatioSum = 0.0;
+    double inlierSum = 0.0;
+    double relativeRotationSum = 0.0;
+    double relativeTranslationSum = 0.0;
+    double rotationSigmaSum = 0.0;
+    double translationSigmaSum = 0.0;
+
+    uint64_t flowFrames = 0;
+    double flowSum = 0.0;
+
+    uint64_t innovationFrames = 0;
+    double innovationSum = 0.0;
+
+    FrameDiagnostics lastGeometry;
+
+    uint64_t pointDepthCount = 0;
+    double pointDepthSum = 0.0;
+    double pointDepthMax = 0.0;
+    size_t mapSizeNow = 0;
+    size_t mapSizePeak = 0;
 
     // Publishing throttled to a few times a second: the dashboard
     // cannot use more, and it keeps the lock off the frame path.

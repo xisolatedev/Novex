@@ -1,51 +1,116 @@
 #include "StereoMatcher.hpp"
 
+#include "FisheyeGeometry.hpp"
 #include "Log.hpp"
 
 #include <opencv2/calib3d.hpp>
 #include <opencv2/video/tracking.hpp>
 
+#include <algorithm>
 #include <cmath>
 
 namespace novex
 {
 
+namespace
+{
+
+// Median by partial sort. Destroys the order of `values`, which are
+// scratch anyway.
+double medianOf(std::vector<double>& values)
+{
+    if (values.empty())
+    {
+        return 0.0;
+    }
+
+    const size_t middle = values.size() / 2;
+
+    std::nth_element(values.begin(),
+                     values.begin() + static_cast<long>(middle),
+                     values.end());
+
+    return values[middle];
+}
+
+double standardDeviationOf(const std::vector<double>& values)
+{
+    if (values.size() < 2)
+    {
+        return 0.0;
+    }
+
+    double sum = 0.0;
+    double squares = 0.0;
+
+    for (double value : values)
+    {
+        sum += value;
+        squares += value * value;
+    }
+
+    const double n = static_cast<double>(values.size());
+    const double mean = sum / n;
+
+    return std::sqrt(std::max(0.0, squares / n - mean * mean));
+}
+
+} // namespace
+
 StereoMatcher::StereoMatcher(const VIOConfig& config,
                              const StereoCalibration& calibration)
     : config(config), calibration(calibration)
 {
-    const cv::Matx33d& R = calibration.rotation();
-    const cv::Vec3d&   T = calibration.translation();
+    // Calibration convention: X_right = R X_left + T. So a direction
+    // seen by the right camera is R^T times it in the left frame, and
+    // the right optical centre (X_right = 0) sits at -R^T T.
+    rotationRightToLeft = calibration.rotation().t();
+    rightCentreInLeft = -(rotationRightToLeft * calibration.translation());
 
-    // E = [T]x R, with the calibration's convention X_right = R
-    // X_left + T. Used only to reject matches that are geometrically
-    // impossible, before spending anything on triangulation.
-    const cv::Matx33d skew(
-             0.0, -T[2],  T[1],
-            T[2],   0.0, -T[0],
-           -T[1],  T[0],   0.0
-    );
+    const size_t capacity = static_cast<size_t>(config.maxFeatures) + 32;
 
-    essential = skew * R;
+    leftPoints.reserve(capacity);
+    rightPoints.reserve(capacity);
+    backPoints.reserve(capacity);
+    candidateIndex.reserve(capacity);
+    candidateRight.reserve(capacity);
+    disparityScratch.reserve(capacity);
+    depthScratch.reserve(capacity);
+    residualScratch.reserve(capacity);
+}
 
-    leftProjection = cv::Matx34d(
-        1.0, 0.0, 0.0, 0.0,
-        0.0, 1.0, 0.0, 0.0,
-        0.0, 0.0, 1.0, 0.0
-    );
+bool StereoMatcher::intersectOnLeftRay(const cv::Vec3d& uL,
+                                       const cv::Vec3d& uR,
+                                       const cv::Vec3d& C,
+                                       RayIntersection& out)
+{
+    const double a = uL.dot(uR);
+    const double denominator = 1.0 - a * a;
 
-    rightProjection = cv::Matx34d(
-        R(0, 0), R(0, 1), R(0, 2), T[0],
-        R(1, 0), R(1, 1), R(1, 2), T[1],
-        R(2, 0), R(2, 1), R(2, 2), T[2]
-    );
+    // Parallel rays: no parallax at all, so no range.
+    if (denominator < 1e-14)
+    {
+        return false;
+    }
 
-    leftPoints.reserve(static_cast<size_t>(config.maxFeatures));
-    rightPoints.reserve(static_cast<size_t>(config.maxFeatures));
-    backPoints.reserve(static_cast<size_t>(config.maxFeatures));
-    candidateIndex.reserve(static_cast<size_t>(config.maxFeatures));
-    candidateLeftNormalised.reserve(static_cast<size_t>(config.maxFeatures));
-    candidateRight.reserve(static_cast<size_t>(config.maxFeatures));
+    const double lc = uL.dot(C);
+    const double rc = uR.dot(C);
+
+    out.range = (lc - a * rc) / denominator;
+    out.rightRange = (a * lc - rc) / denominator;
+
+    // Cheirality for BOTH cameras.
+    if (!(out.range > 0.0) || !(out.rightRange > 0.0))
+    {
+        return false;
+    }
+
+    out.point = uL * out.range;
+    out.miss = (C + uR * out.rightRange) - out.point;
+    out.missRadians = cv::norm(out.miss) / out.range;
+    out.parallaxRadians = angleBetweenUnit(uL, uR);
+
+    return true;
 }
 
 void StereoMatcher::clearDepth(std::vector<Feature>& features)
@@ -78,6 +143,13 @@ void StereoMatcher::compute(const cv::Mat& left,
 
     ScopedStage timing(profiler, Stage::Stereo);
 
+    // Resolved on first use rather than in the constructor: the
+    // calibration is adapted to the camera's negotiated mode after the
+    // pipeline objects exist.
+    const cv::Matx33d& leftK = calibration.leftK();
+
+    radiansPerPixel = 2.0 / (leftK(0, 0) + leftK(1, 1));
+
     lastStats.attempted = static_cast<int>(features.size());
 
     leftPoints.clear();
@@ -108,7 +180,7 @@ void StereoMatcher::compute(const cv::Mat& left,
     cv::fisheye::undistortPoints(
         leftPoints,
         leftNormalised,
-        calibration.leftK(),
+        leftK,
         calibration.leftDistortion()
     );
 
@@ -186,7 +258,6 @@ void StereoMatcher::compute(const cv::Mat& left,
                            config.stereoForwardBackwardThreshold);
 
     candidateIndex.clear();
-    candidateLeftNormalised.clear();
     candidateRight.clear();
 
     for (size_t i = 0; i < features.size(); ++i)
@@ -212,11 +283,11 @@ void StereoMatcher::compute(const cv::Mat& left,
         }
 
         candidateIndex.push_back(static_cast<int>(i));
-        candidateLeftNormalised.push_back(leftNormalised[i]);
         candidateRight.push_back(matched);
     }
 
     lastStats.matched = static_cast<int>(candidateIndex.size());
+    lastStats.rejectedMatch = lastStats.attempted - lastStats.matched;
 
     if (candidateIndex.empty())
     {
@@ -234,117 +305,157 @@ void StereoMatcher::compute(const cv::Mat& left,
         calibration.rightDistortion()
     );
 
-    // Epipolar rejection using the Sampson distance, in normalised
-    // camera units. Everything from here on is ordinary two-view
-    // geometry on bearing vectors, with no lens distortion left in it.
-    std::vector<int> surviving;
-    surviving.reserve(candidateIndex.size());
+    // ---------------------------------------------------------------
+    // Triangulation ON THE LEFT RAY
+    //
+    // This is the fix for the dominant drift source measured on this
+    // rig, so the reasoning is recorded in full.
+    //
+    // The previous implementation used cv::triangulatePoints (linear
+    // DLT). DLT returns a compromise point between the two rays: when
+    // the rays do not intersect exactly - and with this calibration
+    // they miss by a median of several tenths of a pixel, with a
+    // SYSTEMATIC vertical component - the returned point does not lie
+    // on the left observation ray. Reprojected into the left image it
+    // misses the very pixel it was triangulated from.
+    //
+    // Measured on a 600-frame recording of a stationary camera, the
+    // DLT points reprojected a median 0.445 px from their own left
+    // observations, with a mean vertical offset of +0.218 px. Motion is
+    // estimated by PnP from those 3D points to the next frame's left
+    // observations, so every frame PnP "explains" that consistent
+    // offset as a small rotation. It re-occurs every frame because the
+    // points are re-triangulated every frame, so it integrates: 58.8
+    // degrees of rotation and 1.01 m of position drift in 20 s with
+    // the camera not moving at all.
+    //
+    // Keeping the point ON the left ray and taking only its RANGE from
+    // the right eye makes the left reprojection exact by construction.
+    // On the same recording the drift became 0.57 degrees and 0.016 m.
+    // Stereo calibration error now only affects range along the ray -
+    // a scale error on translation - and can no longer manufacture
+    // rotation.
+    //
+    // The range is the point on the left ray closest to the right ray:
+    // minimise |lambda uL - (C + mu uR)|^2 over lambda, mu, with uL and
+    // uR unit bearings in the left frame and C the right optical
+    // centre. With a = uL . uR:
+    //
+    //   lambda = (uL.C - a uR.C) / (1 - a^2)
+    //   mu     = (a uL.C - uR.C) / (1 - a^2)
+    //
+    // Closed form, no SVD, no allocation - cheaper than the DLT it
+    // replaces. Everything is an angle, so the thresholds mean the same
+    // thing at the centre and at the edge of the fisheye.
+    // ---------------------------------------------------------------
 
-    std::vector<cv::Point2f> keptLeft;
-    std::vector<cv::Point2f> keptRight;
+    const double epipolarLimit =
+        config.stereoEpipolarThresholdPx * radiansPerPixel;
 
-    keptLeft.reserve(candidateIndex.size());
-    keptRight.reserve(candidateIndex.size());
+    disparityScratch.clear();
+    depthScratch.clear();
+    residualScratch.clear();
 
-    const double epipolarThreshold =
-        config.stereoEpipolarThreshold * config.stereoEpipolarThreshold;
+    double verticalOffsetSum = 0.0;
 
     for (size_t i = 0; i < candidateIndex.size(); ++i)
     {
-        const cv::Vec3d xLeft(
-            candidateLeftNormalised[i].x, candidateLeftNormalised[i].y, 1.0
+        const size_t featureIndex =
+            static_cast<size_t>(candidateIndex[i]);
+
+        const cv::Vec3d uL = bearingFromNormalised(
+            leftNormalised[featureIndex]
         );
 
-        const cv::Vec3d xRight(
-            rightNormalised[i].x, rightNormalised[i].y, 1.0
-        );
+        const cv::Vec3d uR = rotationRightToLeft *
+            bearingFromNormalised(rightNormalised[i]);
 
-        const cv::Vec3d line  = essential * xLeft;
-        const cv::Vec3d line2 = essential.t() * xRight;
+        RayIntersection ray;
 
-        const double numerator = xRight.dot(line);
+        if (!intersectOnLeftRay(uL, uR, rightCentreInLeft, ray))
+        {
+            // Parallel rays, or converging behind a lens: far points
+            // whose matching error exceeds their true parallax get the
+            // disparity sign wrong and land here.
+            ++lastStats.rejectedDepth;
+            continue;
+        }
 
-        const double denominator =
-            line[0]  * line[0]  + line[1]  * line[1] +
-            line2[0] * line2[0] + line2[1] * line2[1];
-
-        if (denominator < 1e-12)
+        // How far apart the rays pass, seen from the left camera. This
+        // is the epipolar error as an angle, uniform across the lens.
+        if (ray.missRadians > epipolarLimit)
         {
             ++lastStats.rejectedEpipolar;
             continue;
         }
 
-        if ((numerator * numerator) / denominator > epipolarThreshold)
+        const cv::Vec3d& onLeft = ray.point;
+        const cv::Vec3d& miss = ray.miss;
+        const double lambda = ray.range;
+        const double residual = ray.missRadians;
+
+        const double depth = onLeft[2];
+
+        // Cheirality plus a depth window. Points beyond the far limit
+        // are not wrong so much as unmeasurable: at a 110 mm baseline
+        // their disparity is under a pixel, so their range is noise.
+        if (!(depth > config.minDepthMeters) ||
+            !(depth < config.maxDepthMeters))
         {
-            ++lastStats.rejectedEpipolar;
+            ++lastStats.rejectedDepth;
             continue;
         }
 
-        surviving.push_back(candidateIndex[i]);
-        keptLeft.push_back(candidateLeftNormalised[i]);
-        keptRight.push_back(rightNormalised[i]);
+        // Parallax between the rays as seen from the point. For a
+        // small angle, range ~ baseline / parallax, so a one-pixel
+        // matching error changes range by the fraction
+        // (one pixel) / parallax.
+        const double parallax = ray.parallaxRadians;
+
+        Feature& feature = features[featureIndex];
+
+        feature.hasDepth = true;
+        feature.position3D = cv::Point3f(
+            static_cast<float>(onLeft[0]),
+            static_cast<float>(onLeft[1]),
+            static_cast<float>(onLeft[2])
+        );
+
+        feature.disparityPx = static_cast<float>(parallax / radiansPerPixel);
+        feature.depthSigma = static_cast<float>(
+            radiansPerPixel / std::max(parallax, 1e-9)
+        );
+        feature.stereoResidualPx =
+            static_cast<float>(residual / radiansPerPixel);
+
+        disparityScratch.push_back(feature.disparityPx);
+        depthScratch.push_back(depth);
+        residualScratch.push_back(feature.stereoResidualPx);
+
+        verticalOffsetSum += (miss[1] / lambda) / radiansPerPixel;
+
+        ++lastStats.triangulated;
     }
 
-    if (surviving.empty())
+    if (lastStats.triangulated == 0)
     {
         return;
     }
 
-    cv::triangulatePoints(
-        leftProjection,
-        rightProjection,
-        keptLeft,
-        keptRight,
-        triangulated
-    );
+    const auto bounds =
+        std::minmax_element(depthScratch.begin(), depthScratch.end());
 
-    for (int i = 0; i < triangulated.cols; ++i)
-    {
-        const float w = triangulated.at<float>(3, i);
+    lastStats.depthMin = *bounds.first;
+    lastStats.depthMax = *bounds.second;
+    lastStats.depthStd = standardDeviationOf(depthScratch);
+    lastStats.disparityStdPx = standardDeviationOf(disparityScratch);
 
-        if (std::abs(w) < 1e-9f)
-        {
-            ++lastStats.rejectedDepth;
-            continue;
-        }
+    lastStats.depthMedian = medianOf(depthScratch);
+    lastStats.disparityMedianPx = medianOf(disparityScratch);
+    lastStats.residualMedianPx = medianOf(residualScratch);
 
-        const cv::Point3f point(
-            triangulated.at<float>(0, i) / w,
-            triangulated.at<float>(1, i) / w,
-            triangulated.at<float>(2, i) / w
-        );
-
-        // Cheirality plus a depth window. Points beyond the far limit
-        // are not wrong so much as unmeasurable: at a 110 mm baseline
-        // their disparity is under a pixel, so their depth is noise
-        // and they would drag the motion estimate around.
-        if (!(point.z > config.minDepthMeters) ||
-            !(point.z < config.maxDepthMeters))
-        {
-            ++lastStats.rejectedDepth;
-            continue;
-        }
-
-        // Must also be in front of the right camera.
-        const cv::Vec3d inRight =
-            calibration.rotation() *
-                cv::Vec3d(point.x, point.y, point.z) +
-            calibration.translation();
-
-        if (inRight[2] <= 0.0)
-        {
-            ++lastStats.rejectedDepth;
-            continue;
-        }
-
-        Feature& feature =
-            features[static_cast<size_t>(surviving[static_cast<size_t>(i)])];
-
-        feature.hasDepth = true;
-        feature.position3D = point;
-
-        ++lastStats.triangulated;
-    }
+    lastStats.verticalOffsetMeanPx =
+        verticalOffsetSum / lastStats.triangulated;
 }
 
 } // namespace novex

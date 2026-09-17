@@ -19,6 +19,10 @@ public:
 
     static void print(const DebugStatistics& statistics,
                       FILE* out = stdout);
+
+    // The stationary-camera drift section on its own.
+    static void printStationary(const StationaryReport& report,
+                                FILE* out = stdout);
 };
 
 } // namespace novex

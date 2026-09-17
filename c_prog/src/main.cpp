@@ -356,6 +356,23 @@ int main(int argc, char** argv)
                 state.position.z(),
                 static_cast<unsigned long long>(state.droppedFrames)
             );
+
+            const FrameDiagnostics& g = vio.diagnostics();
+
+            LOG_INFO(
+                "geometry: flow %.2f px  depth %.2f m  disparity %.1f px  "
+                "reproj %.3f px  inliers %d/%d  rel %.3f deg %.2f mm  "
+                "rejected motion %llu",
+                g.flowMedianPx,
+                g.depthMedian,
+                g.disparityMedianPx,
+                g.reprojectionMedianPx,
+                g.inliers,
+                g.correspondences,
+                g.relativeRotationDeg,
+                g.relativeTranslationM * 1e3,
+                static_cast<unsigned long long>(g.motionRejectedTotal)
+            );
         }
 
         if (config.maxFrames > 0 && processedFrames >= config.maxFrames)
@@ -400,6 +417,14 @@ int main(int argc, char** argv)
     // The debug report is printed exactly once, here, on the single
     // exit path. Every earlier `return 1` is a start-up failure, where
     // there is nothing measured to report.
+    // Without --debug the stationary test still reports: it is its
+    // own diagnostic. With --debug it is part of the full report.
+    if (!config.debugEnabled &&
+        (config.stationaryTestEnabled || vio.stationaryReport().haveData))
+    {
+        DebugReporter::printStationary(vio.stationaryReport());
+    }
+
     if (config.debugEnabled)
     {
         DebugStatistics final =
@@ -433,6 +458,14 @@ int main(int argc, char** argv)
         final.trackedFeatures = last.state.trackedFeatures;
         final.stereoMatchesCurrent = last.stereoTriangulated;
         final.orientation = last.state.orientation;
+
+        final.stationary = last.stationary;
+
+        final.pointCloudEnabled = last.pointCloudEnabled;
+        final.pointMapEnabled = last.pointMapEnabled;
+        final.pointCounters = last.pointCounters;
+        final.mapCapacity = last.mapCapacity;
+        final.voxelSize = last.voxelSize;
 
         DebugReporter::print(final);
     }

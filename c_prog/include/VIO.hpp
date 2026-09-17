@@ -2,9 +2,11 @@
 
 #include "CommandQueue.hpp"
 #include "DebugStatistics.hpp"
+#include "Diagnostics.hpp"
 #include "FeatureTracker.hpp"
 #include "IMU.hpp"
 #include "MotionEstimator.hpp"
+#include "PointCloud.hpp"
 #include "Profiler.hpp"
 #include "StateEstimator.hpp"
 #include "StereoCalibration.hpp"
@@ -49,6 +51,30 @@ struct VIOSnapshot
     uint64_t resetCount = 0;
     uint64_t recenterCount = 0;
     bool originRecentered = false;
+
+    // Geometry measurements of the most recent frame, with run totals.
+    FrameDiagnostics diagnostics;
+
+    // Live stationary-test statistics; haveData false if never run.
+    StationaryReport stationary;
+
+    // Point cloud state. Counters are run totals since start-up.
+    bool pointCloudEnabled = false;
+    bool pointMapEnabled = false;
+    size_t livePoints = 0;
+    size_t mapPoints = 0;
+    size_t mapCapacity = 0;
+    double voxelSize = 0.0;
+    uint32_t mapEpoch = 0;
+    PointCloudCounters pointCounters;
+
+    // Recenter origin inside the internal frame, as a quaternion and
+    // position. Lets a viewer that stores data in the internal frame
+    // (the point map, the trajectory) express it in the reported one.
+    Eigen::Quaterniond originOrientation = Eigen::Quaterniond::Identity();
+    Eigen::Vector3d originPosition = Eigen::Vector3d::Zero();
+
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
 class VIO
@@ -109,6 +135,18 @@ public:
 
     const VIOState& state() const { return estimator.state(); }
 
+    // Point snapshots for the IPC server. The VIO thread only ever
+    // try_locks inside it, so a reader can never stall a frame.
+    PointCloudChannel& pointChannel() { return points; }
+
+    const FrameDiagnostics& diagnostics() const { return frameDiagnostics; }
+
+    StationaryReport stationaryReport() const { return stationary.report(); }
+
+    const PointCloudCounters& pointCounters() const { return pointTotals; }
+
+    const PointMap& pointMap() const { return map; }
+
 private:
 
     void publish();
@@ -116,6 +154,23 @@ private:
     void apply(const Command& command);
 
     bool isVisuallyStationary() const;
+
+    void measureFlow();
+
+    // Whether an accepted estimate should make this frame a new
+    // keyframe.
+    bool keyframeDue(const MotionResult& result);
+
+    // After stereo: advance or keep the motion reference depths.
+    void updateReferences(bool motionAccepted, bool newKeyframe,
+                          double timestamp);
+
+    void fillMotionDiagnostics(const MotionResult& result,
+                               const Eigen::Matrix3d& previousRotation,
+                               const Eigen::Vector3d& previousPosition);
+
+    void buildPointCloud(const cv::Mat& left, bool poseValid,
+                         double timestamp);
 
     const VIOConfig& config;
     const StereoCalibration& calibration;
@@ -155,6 +210,28 @@ private:
     bool imuRuntimeEnabled = false;
 
     uint64_t resets = 0;
+
+    // ---- motion reference ----
+    double referenceTimestamp = 0.0;
+    int referenceSpan = 0;
+
+    // Inliers of the first estimate against the current keyframe, the
+    // baseline its retention is measured against. 0 = not yet known.
+    int keyframeInliers = 0;
+    uint64_t keyframes = 0;
+
+    // ---- diagnostics ----
+    FrameDiagnostics frameDiagnostics;
+    StationaryDiagnostic stationary;
+    std::vector<double> flowScratch;
+
+    // ---- point cloud ----
+    PointMap map;
+    PointCloudChannel points;
+    PointCloudCounters pointTotals;
+    std::vector<LivePoint> liveScratch;
+    std::vector<float> innovationScratch;
+    double lastPointPublish = -1.0;
 
     mutable std::mutex snapshotMutex;
     VIOSnapshot published;

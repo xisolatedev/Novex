@@ -15,6 +15,8 @@ const char* commandName(CommandType type)
         case CommandType::Resume:           return "resume";
         case CommandType::SetStereoEnabled: return "set-stereo";
         case CommandType::SetImuEnabled:    return "set-imu";
+        case CommandType::StationaryTest:   return "stationary-test";
+        case CommandType::ClearMap:         return "clear-map";
         default:                            return "?";
     }
 }
@@ -31,6 +33,18 @@ bool parseCommand(const std::string& word, bool flag, Command& out)
     if (word == "SET_STEREO")
     {
         out.type = CommandType::SetStereoEnabled;
+        return true;
+    }
+
+    if (word == "STATIONARY")
+    {
+        out.type = CommandType::StationaryTest;
+        return true;
+    }
+
+    if (word == "CLEAR_MAP")
+    {
+        out.type = CommandType::ClearMap;
         return true;
     }
 

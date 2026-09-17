@@ -255,6 +255,71 @@ fi
 
 # -----------------------------------------------------------------
 echo
+echo "--- Point cloud: binary stream, delta map, diagnostics"
+# -----------------------------------------------------------------
+
+POINTS=$(node "$(dirname "$0")/points_client.js" "$PORT" 4 2>&1)
+
+pc() { echo "$POINTS" | jqf "$@"; }
+
+if [ "$(pc badHeaders)" = "0" ] && [ "$(pc liveMessages)" -gt 5 ] 2>/dev/null; then
+    ok "binary LIVE messages arrive with valid headers ($(pc liveMessages) in 4 s)"
+else
+    bad "no valid LIVE point messages: $POINTS"
+fi
+
+if [ "$(pc mapResets)" -ge 1 ] 2>/dev/null && [ "$(pc mapMessages)" -gt 5 ] 2>/dev/null; then
+    ok "new client got a full map, then deltas ($(pc mapMessages) messages)"
+else
+    bad "map stream missing or never reset for a new client: $POINTS"
+fi
+
+MIRROR=$(pc mirrorSize)
+REPORTED=$(pc reportedMapSize)
+
+if [ -n "$MIRROR" ] && [ "$MIRROR" = "$REPORTED" ] && [ "$MIRROR" -gt 0 ]; then
+    ok "map rebuilt from deltas matches the daemon ($MIRROR points)"
+else
+    bad "delta-rebuilt map $MIRROR != daemon map $REPORTED"
+fi
+
+DIAG=$(curl -s "$BASE/api/v1/diagnostics")
+
+if [ -n "$(echo "$DIAG" | jqf geometry reprojectionMedianPx)" ] &&
+   [ -n "$(echo "$DIAG" | jqf stationary indication)" -o "$(echo "$DIAG" | jqf stationary haveData)" = "False" ] &&
+   [ -n "$(echo "$DIAG" | jqf pointCloud mapPoints)" ]; then
+    ok "GET /api/v1/diagnostics carries geometry, stationary and point cloud"
+else
+    bad "diagnostics endpoint incomplete: ${DIAG:0:200}"
+fi
+
+curl -s -X POST "$BASE/api/v1/vio/stationary?enabled=true" > /dev/null
+sleep 3
+ACTIVE=$(curl -s "$BASE/api/v1/diagnostics" | jqf stationary active)
+FRAMES=$(curl -s "$BASE/api/v1/diagnostics" | jqf stationary frames)
+curl -s -X POST "$BASE/api/v1/vio/stationary?enabled=false" > /dev/null
+
+if [ "$ACTIVE" = "True" ] && [ "$FRAMES" -gt 30 ] 2>/dev/null; then
+    ok "stationary test starts from the API and collects ($FRAMES frames)"
+else
+    bad "stationary test did not run (active=$ACTIVE frames=$FRAMES)"
+fi
+
+EPOCH_BEFORE=$(curl -s "$BASE/api/v1/diagnostics" | jqf pointCloud mapEpoch)
+curl -s -X POST "$BASE/api/v1/map/clear" > /dev/null
+sleep 1
+EPOCH_AFTER=$(curl -s "$BASE/api/v1/diagnostics" | jqf pointCloud mapEpoch)
+TRACKING=$(curl -s "$BASE/api/v1/state" | jqf tracking)
+
+if [ -n "$EPOCH_BEFORE" ] && [ "$EPOCH_AFTER" -gt "$EPOCH_BEFORE" ] 2>/dev/null &&
+   [ "$TRACKING" = "True" ]; then
+    ok "clear map starts a new epoch and leaves tracking alone"
+else
+    bad "clear map: epoch $EPOCH_BEFORE -> $EPOCH_AFTER, tracking $TRACKING"
+fi
+
+# -----------------------------------------------------------------
+echo
 echo "--- Test 28: clean shutdown stops node and prints one report"
 # -----------------------------------------------------------------
 

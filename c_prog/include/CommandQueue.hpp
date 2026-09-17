@@ -16,7 +16,9 @@ enum class CommandType
     Pause,             // stop processing frames, keep everything alive
     Resume,
     SetStereoEnabled,  // uses Command::flag
-    SetImuEnabled      // uses Command::flag
+    SetImuEnabled,     // uses Command::flag
+    StationaryTest,    // flag: start (true) or stop (false) the window
+    ClearMap           // drop the accumulated point map, keep tracking
 };
 
 struct Command

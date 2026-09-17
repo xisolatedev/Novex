@@ -18,6 +18,7 @@ const char* stageName(Stage stage)
         case Stage::Motion:     return "motion";
         case Stage::State:      return "state";
         case Stage::Imu:        return "imu";
+        case Stage::PointCloud: return "pointcloud";
         case Stage::Total:      return "total";
         default:                return "?";
     }
@@ -163,7 +164,7 @@ void Profiler::formatSummary(char* buffer, size_t size) const
         "cap %.1f/proc %.1f fps  lat %.1f ms | "
         "capture %.1f (decode %.1f)  pre %.1f  detect %.1f  "
         "track %.1f  stereo %.1f  motion %.1f  state %.1f  "
-        "imu %.1f  total %.1f ms",
+        "imu %.1f  points %.2f  total %.1f ms",
         captureFPS(),
         processingFPS(),
         latency() * 1e3,
@@ -176,6 +177,7 @@ void Profiler::formatSummary(char* buffer, size_t size) const
         average(Stage::Motion)     * 1e3,
         average(Stage::State)      * 1e3,
         average(Stage::Imu)        * 1e3,
+        average(Stage::PointCloud) * 1e3,
         average(Stage::Total)      * 1e3
     );
 }

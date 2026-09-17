@@ -89,6 +89,8 @@ set(NOVEX_CORE_SOURCES
     src/FeatureTracker.cpp
     src/StereoMatcher.cpp
     src/MotionEstimator.cpp
+    src/Diagnostics.cpp
+    src/PointCloud.cpp
     src/IMU.cpp
     src/StateEstimator.cpp
     src/VIO.cpp
@@ -157,6 +159,16 @@ add_executable(novex-geometry-audit tools/geometry_audit.cpp)
 target_link_libraries(novex-geometry-audit PRIVATE novex-core)
 
 target_compile_options(novex-geometry-audit PRIVATE ${NOVEX_FLAGS})
+
+# Record raw stereo frames, and replay them through the real pipeline,
+# so estimator changes can be compared on identical input.
+add_executable(novex-record tools/novex_record.cpp)
+target_link_libraries(novex-record PRIVATE novex-core)
+target_compile_options(novex-record PRIVATE ${NOVEX_FLAGS})
+
+add_executable(novex-replay tools/novex_replay.cpp)
+target_link_libraries(novex-replay PRIVATE novex-core)
+target_compile_options(novex-replay PRIVATE ${NOVEX_FLAGS})
 
 add_executable(novex-vio-test tests/test_novex.cpp)
 

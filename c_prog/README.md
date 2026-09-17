@@ -9,10 +9,17 @@ visual odometry and nothing is stubbed or faked; with it enabled the
 IMU contributes where it can do so honestly (see
 [Assumptions](#assumptions)).
 
-Status: **the pipeline runs end to end on real hardware at 30 fps.**
-Measured numbers below are from actual runs, not estimates. The
-sections on what is *not* finished are as important as the rest, and
-are at the bottom.
+Status: **the pipeline runs end to end on real hardware at 30 fps**,
+with a live 3D feature point cloud in the dashboard. Measured numbers
+below are from actual runs, not estimates. The sections on what is
+*not* finished are as important as the rest, and are at the bottom.
+
+**Drift:** the dominant drift sources were found, measured and fixed -
+see [Drift: what was wrong and how it was measured](#drift-what-was-wrong-and-how-it-was-measured).
+On a 90 s handheld loop, scored against a directly measured ground
+truth, the end-pose error went from **52.4° / 4.00 m** to
+**4.6° / 0.59 m**; on 100 s with the camera still, from **86.5° /
+0.64 m** to **0.83° / 0.035 m**.
 
 ---
 
@@ -32,8 +39,10 @@ c_prog/
 ├── web/                         --web dashboard (Node + Three.js)
 │   ├── server.js                relay: Unix socket -> WebSocket
 │   ├── lib/websocket.js         small RFC 6455 server, no deps
-│   ├── lib/novexclient.js       daemon socket client
+│   ├── lib/novexclient.js       daemon socket client (text + binary)
+│   ├── lib/pointcloud.js        point wire format, per-browser map sync
 │   ├── public/                  index.html, app.js, style.css
+│   │   ├── mesh-worker.js       experimental surface mesh (Web Worker)
 │   │   └── vendor/              Three.js r160, vendored
 │   ├── tools/mock-daemon.js     TEST FIXTURE (synthetic data)
 │   └── README.md
@@ -50,8 +59,11 @@ c_prog/
 │   ├── Camera.hpp               V4L2 stereo acquisition
 │   ├── StereoCalibration.hpp    calibration + resolution adaptation
 │   ├── FeatureTracker.hpp       grid Shi-Tomasi + KLT
-│   ├── StereoMatcher.hpp        left/right matching + triangulation
-│   ├── MotionEstimator.hpp      PnP + RANSAC
+│   ├── FisheyeGeometry.hpp      per-point Kannala-Brandt, angular errors
+│   ├── StereoMatcher.hpp        left/right matching + left-ray range
+│   ├── MotionEstimator.hpp      PnP RANSAC + robust angular refinement
+│   ├── Diagnostics.hpp          per-frame geometry, stationary test
+│   ├── PointCloud.hpp           3D points, voxel map, binary transport
 │   ├── StateEstimator.hpp       pose integration, optional IMU aid
 │   ├── IMU.hpp                  optional IMU, threaded ring buffer
 │   ├── VIOState.hpp             the published state struct
@@ -60,11 +72,15 @@ c_prog/
 │   └── Gui.hpp                  development display (not core)
 ├── src/                         one .cpp per header above, plus main.cpp
 ├── tests/
-│   ├── test_novex.cpp           31 in-process checks
+│   ├── test_novex.cpp           39 in-process checks
 │   ├── test_lifecycle.sh        daemon, IPC and signal checks
-│   └── test_web.sh              --debug / --web acceptance checks
+│   ├── test_web.sh              --debug / --web / point cloud checks
+│   └── points_client.js         WebSocket point stream test client
 └── tools/
     ├── novex_state_client.cpp   example IPC client (libc only)
+    ├── geometry_audit.cpp       calibration + geometry audit
+    ├── novex_record.cpp         record raw stereo frames
+    ├── novex_replay.cpp         replay a recording through the real VIO
     └── benchmark.sh             measures this machine
 ```
 
@@ -83,8 +99,9 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 ```
 
-Produces `build/novex-vio`, `build/novex-state` and
-`build/novex-vio-test`.
+Produces `build/novex-vio`, `build/novex-state`,
+`build/novex-vio-test`, and the tools `build/novex-geometry-audit`,
+`build/novex-record` and `build/novex-replay`.
 
 `-DNOVEX_NATIVE_ARCH=ON` adds `-mcpu=native`. Use it only when the
 binary will run on the machine that built it.
@@ -92,9 +109,12 @@ binary will run on the machine that built it.
 ### Run the tests
 
 ```bash
-./build/novex-vio-test          # 24 checks; needs the camera for 9 of them
+./build/novex-vio-test          # 39 checks; needs the camera for 10 of them
 ./build/novex-vio-test --no-camera
 ./tests/test_lifecycle.sh       # daemon, IPC, SIGTERM/SIGINT
+./tests/test_web.sh             # --debug/--web, point stream, controls
+./build/novex-geometry-audit    # calibration + geometry, known answers
+./build/novex-geometry-audit --recording DIR   # + checks on real frames
 ```
 
 Tests that cannot run are reported as **SKIP**, never as a pass.
@@ -147,7 +167,26 @@ Open the dashboard at **http://127.0.0.1:8080** (change with
 
 Useful flags: `--debug`, `--web`, `--web-port N`, `--features N`, `--width/--height/--fps`, `--device N`,
 `--socket PATH`, `--no-ipc`, `--no-stereo`, `--max-frames N`,
+`--stationary-test`, `--keyframe-retention R`, `--no-pointcloud`,
+`--no-point-map`, `--map-points N`, `--voxel-size M`,
 `--log debug`, `--config PATH`. Full list with `--help`.
+
+### Record once, replay many times
+
+Estimator changes are compared on **identical input**, never on two
+live runs that happened to see different motion:
+
+```bash
+./build/novex-record /tmp/loop 2700          # 90 s of lossless frames
+./build/novex-replay /tmp/loop               # full --debug report
+./build/novex-replay /tmp/loop --keyframe-retention 0 --stationary-test
+./build/novex-geometry-audit --recording /tmp/loop
+```
+
+`novex-replay` drives the same `VIO` class the daemon uses, with the
+recorded camera timestamps. Its stage timings measure PNG replay on
+the machine running it; compare geometry and drift across replays and
+performance on live runs.
 
 Precedence is defaults, then the config file, then the command line.
 A missing config file is not an error; the built-in defaults are a
@@ -194,6 +233,134 @@ loop holds for microseconds once per frame; replies use
 than parking anything. This is tested: check 15 hammers the socket
 from one thread while a second client deliberately never reads, and
 compares VIO time under load against idle.
+
+---
+
+## Drift: what was wrong and how it was measured
+
+The symptom: tracking was strong (99%+ success, 150+ inliers) while the
+pose drifted badly - tens of degrees and metres per minute, including
+while the camera was barely moving. Nothing below was fixed by
+clamping, smoothing, zeroing velocity or hiding frames. Each cause was
+isolated by measurement, fixed, and re-measured on **identical
+recorded input**.
+
+### Method
+
+* **Recordings.** `novex-record` saves lossless stereo frames with
+  camera timestamps; `novex-replay` runs them through the real `VIO`
+  class. Two recordings are used throughout: `static100` (100 s, camera
+  on a desk) and `loop90` (90 s, handheld loop in a dim room, with fast
+  turns, returned near the start).
+* **Ground truth.** The true start-to-end pose of each recording was
+  measured *directly* - ORB matches between the first and last frame,
+  stereo depth on the first, one PnP - with no integration at all. For
+  `loop90`: **22.48° (mostly yaw), position (−0.053, +0.051, +0.086) m,
+  1σ 0.08° / 6 mm**, reproduced on three independent frame pairs within
+  0.7° / 1.5 cm. For `static100`: 0.05° / 1 mm, i.e. genuinely still.
+* **Stationary test** (`--stationary-test`, below) attributes drift to
+  tracking, stereo, motion estimation or integration.
+
+### Finding 1 - triangulated points did not lie on their own pixel
+
+Linear DLT triangulation (`cv::triangulatePoints`) returns a
+compromise between the left and right rays. This calibration's rays do
+not intersect exactly (see [the calibration audit](#calibration-audit)),
+so the 3D point missed the very left pixel it came from:
+
+| 20 s stationary recording | left reprojection of stereo points | net drift |
+|---|---|---|
+| DLT (original) | median **0.445 px**, mean dy **+0.218 px** | **58.8° / 1.013 m** |
+| point kept on the left ray | 0.000 px | 0.57° / 0.016 m |
+
+Motion is PnP from those 3D points to the next frame's pixels, so every
+frame PnP explained the constant vertical offset as a small pitch, and
+the points were re-triangulated every frame, so it integrated. The
+original run's 79.5° final pitch is this mechanism.
+
+**Fix:** stereo now returns the point *on the left ray* closest to the
+right ray; the right eye contributes range only
+(`StereoMatcher::intersectOnLeftRay`, closed form, cheaper than DLT).
+Calibration error can now only scale range, never manufacture
+rotation. Regression-tested in `novex-geometry-audit` section 6: a
+simulated 0.5 px stereo error with a still camera gives **0** motion,
+against 0.042°/frame (1.3°/s) with DLT points.
+
+### Finding 2 - fisheye residuals were weighted on the wrong surface
+
+PnP refinement ran on the normalised image plane, where one pixel at
+incidence θ is sec²θ larger than at the centre - about **13×** at the
+corner of this 640×480 fisheye. Least squares was dominated by the
+edge of the lens, where the calibration is worst. Stereo gating had
+the mirror problem (13× stricter at the edge).
+
+**Fix:** OpenCV RANSAC still proposes the pose, but inliers are chosen
+by *angle* and the pose is refined by robust (Huber) Gauss-Newton on
+bearing angles, which also yields the per-frame uncertainty and
+conditioning now reported. Checked with 25% gross outliers and 0.5 px
+noise: mean error 0.021° / 0.80 mm, consistent with the reported 1σ.
+
+### Finding 3 - rejected frames silently lost their motion
+
+A rejected estimate left the pose unchanged, and the next estimate
+started from the *rejected* frame's depths - so that interval's real
+motion was never measured. **Fix:** reference depths are kept across
+rejected frames, and the next accepted estimate spans the gap (checked
+by test P7). When too few features still carry reference depth, the
+re-anchor is counted as genuinely unmeasured motion.
+
+### Finding 4 - frame-to-frame integration drifts along a blind direction
+
+With findings 1-3 fixed, `static100` still drifted 6.06° / 0.169 m,
+and the stationary test called it a significant bias (11.2σ / 8.5σ).
+Measured:
+
+* brightness stable to 0.7/255 over the window - not illumination;
+* chained KLT crept ~1 px from a direct first-to-last-frame KLT over
+  90 s - real, but ~30× too small to explain 6°;
+* the drift was rotation about x/y **paired with the opposite
+  translation**, in the ratio of a pivot about a point 0.85-1.8 m in
+  front of the camera. The scene's median depth is 1.35 m. For a scene
+  at nearly one depth that pivot barely changes the image, so it is
+  weakly observable per frame, and chaining 3000 frame-to-frame
+  estimates random-walks along it.
+
+**Fix: keyframe-relative estimation.** Each frame is measured against
+a keyframe's 3D points, not the previous frame's, so per-frame errors
+no longer integrate. A new keyframe is taken when the inliers still
+linking to it fall below `motion.keyframe_retention` (0.7) of its
+first estimate's. It reuses the reference-depth mechanism from
+finding 3.
+
+### Results, against ground truth
+
+| | loop90 rotation err | loop90 position err | static100 rotation err | static100 position err |
+|---|---:|---:|---:|---:|
+| original code | 52.4° | 4.00 m | 86.5° | 0.64 m |
+| findings 1-3 (frame-to-frame) | 35.6° | 2.24 m | 6.0° | 0.17 m |
+| **+ keyframes (default, 0.7)** | **4.6°** | **0.59 m** | **0.83°** | **0.035 m** |
+
+`static100` with keyframes: stationary-test bias 1.4σ / 0.9σ (no longer
+significant), drift 0.52°/min. Keyframes raise the median reprojection
+error from 0.17 to 0.34 px and lower the inlier ratio from 99% to 87%,
+because observations are compared with older depths; that is the
+expected cost, and it is reported rather than hidden.
+
+### What is still wrong, measured
+
+* **Stereo calibration.** On real frames the right-eye rays sit a median
+  **+0.86 px low** (up to ~2.3 px towards the lens edge; audit section
+  8). Since finding 1 this cannot create rotation, but it degrades
+  matching and depth. The remedy is a stereo recalibration with better
+  edge coverage, not a threshold.
+* **Sensitivity is at the single-loop noise level.** On `loop90`,
+  single-parameter changes moved the result within about ±2° / ±0.3 m
+  (e.g. a 1.5 px epipolar gate: 2.9° / 0.35 m; depth ≤ 5 m: 2.3° /
+  0.68 m; retention 0.5 / 0.8 / 0.9: 5.5° / 0.44 m, 3.8° / 0.61 m,
+  4.2° / 0.79 m). Defaults were **not** tuned to one loop.
+* **KLT creep** (~1 px / 90 s) and depth noise in far scenes (`loop90`
+  median depth 3.5 m, 7.4 px parallax) bound what frame-to-keyframe PnP
+  can do. There is no bundle adjustment and no loop closure.
 
 ---
 
@@ -249,7 +416,84 @@ also available at 30 fps, at four times the pixel cost.
 
 ---
 
+### Calibration audit
+
+`novex-geometry-audit` checks every step with known answers, and with
+`--recording DIR` also checks the calibration against real frames. Its
+results on this rig:
+
+| check | result |
+|---|---|
+| adapted K == crop-then-scale of the original, 625 rays incl. far outside the crop | max 6e-5 px (float32 floor) |
+| k1..k4 untouched (valid only for an isotropic scale) | exact |
+| pixel-centre convention: code aligns pixel centres at the crop origin; area-aligned resampling would differ by 0.5(1−s) | 0.167 px = a **0.033° common rotation**, 0.33 mm depth change at 2 m - negligible, and the ORB affine fit (±0.5 px) cannot tell the two apart, so the measured formula is kept |
+| Kannala-Brandt pixel → bearing → pixel over the whole image, both lenses | max 1.7e-5 px, edge included |
+| triangulation of known depths 0.3-20 m | max 1.3e-5 relative |
+| disparity sign in a common orientation, baseline direction | positive; right eye at (+0.1104, −0.0001, −0.0018) m |
+| **extrinsic convention on 5154 real matches**: X_right = R X_left + T | median ray miss **1.26 px**, 4.9% behind camera |
+| … the inverted convention | 7.36 px, **82.5%** behind camera |
+| … rotation ignored | 1.81 px, 10.7% behind |
+| real-frame median vertical miss by radius 0-80 / 80-160 / 160-240 / 240-320 px | +1.32 / +1.03 / +0.32 / +1.15 px (overall **+0.86 px**) |
+
+So the transformation, the lens model, the extrinsic convention, the
+disparity and depth signs and the baseline direction are all correct.
+What is not perfect is the calibration itself: a persistent vertical
+offset between the eyes. It is reported live as "stereo vertical
+offset" so a recalibration can be judged by it.
+
+---
+
 ## Measured performance
+
+### Before and after the drift and point cloud work
+
+Development machine (Intel i5-8500T), live camera, same scene, 900
+frames each, runs alternated original / new / original / new, point
+cloud enabled in the new build:
+
+| | original | new |
+|---|---:|---:|
+| average frame | 6.69 / 6.90 ms | **6.25 / 6.30 ms** |
+| p50 / p99 | 6.12 / 15.1-21.1 ms | 5.62 / 13.9-14.1 ms |
+| stereo | 3.9 / 3.2 ms | 3.1 / 3.0 ms |
+| motion | 0.74 / 0.79 ms | 0.46 / 0.48 ms |
+| point cloud stage | - | 0.02 ms |
+| process CPU for 900 frames | 40.1 s | 38.6 / 38.9 s |
+
+The new build is slightly **cheaper**: closed-form left-ray range beats
+DLT plus its per-frame allocations, and the angular Gauss-Newton beats
+`solvePnPRefineLM`.
+
+The same holds on a harder scene. `process()` timed directly over the
+first 900 frames of the dim handheld loop recording (~380 features;
+the feature count keeps falling below the re-detect threshold, so the
+~5 ms detection runs most frames - which is why this scene costs ~12 ms
+and a still, textured desk ~6 ms):
+
+| build | mean | p50 | p90 | p99 |
+|---|---:|---:|---:|---:|
+| original | 13.06 ms | 12.29 | 14.35 | 33.63 |
+| new (defaults) | 12.55 ms | 12.31 | 14.16 | 16.37 |
+| new, `--no-pointcloud` | 12.69 ms | 12.31 | 14.53 | 18.83 |
+| new, frame-to-frame (no keyframes) | 12.33 ms | 11.81 | 13.80 | 22.10 |
+
+The point cloud has no measurable cost and keyframing is within
+run-to-run noise.
+
+Visualisation cost, per thread, 25 s windows (the IPC thread is named
+`novex-ipc` so this can be read in `top -H`):
+
+| configuration | `novex-ipc` thread | Node relay | avg frame |
+|---|---:|---:|---:|
+| IPC only | 0.0% | - | 6.38 ms |
+| `--web`, no browser | 0.3% | 0.5% | 6.53 ms |
+| `--web` + a client taking the binary point stream | 0.4% | 1.1% | 6.09 ms |
+
+Streaming the live points and map deltas at 10 Hz costs under half a
+percent of one core on the daemon side; frame-time differences between
+rows are run-to-run noise (other desktop load was present).
+
+### Earlier measurements
 
 Development machine, Intel i5-7500, 1280×480 MJPG, 400 features,
 600 frames, **0 dropped**:
@@ -442,54 +686,67 @@ These are deliberately different and must not be merged.
 | Velocity filter, gyro bias | cleared | **kept** |
 | Reported origin | identity | moved to the current pose |
 | Tracking | dropped, must re-initialise | **never interrupted** |
+| Keyframe / reference depths | discarded | **kept** |
+| Point map | cleared (new epoch) | **kept**, re-expressed through the new origin |
+| Dashboard trajectory | cleared | **kept**, re-expressed through the new origin |
+| Stationary test window | restarted at the new origin | untouched |
 
 `recenter()` only changes the frame results are *expressed* in. The
 estimator keeps integrating in its original frame, so recentring costs
 nothing in accuracy and cannot lose tracking. Asserted by checks `D5`
 and `D6`.
 
-### Coordinate system
+### Coordinate systems
 
-Novex reports poses in the **OpenCV camera convention**, because that
-is what its stereo geometry produces — triangulation runs with the left
-camera as `[I|0]` and points are accepted on `z > 0`:
+Everything the daemon emits uses the **OpenCV camera convention**,
+right-handed, because that is what the stereo geometry produces:
 
 ```
-Novex:     X right,  Y DOWN,  Z forward (along the optical axis)
+Novex:     X right,  Y DOWN,  Z forward (the LEFT lens' optical axis)
 Three.js:  X right,  Y up,    Z toward the viewer
 ```
 
-The two differ by a 180° rotation about X, `M = diag(1, -1, -1)`. That
-is a **proper rotation** (determinant +1), not a mirror, so:
+Four frames, each named where it is used:
+
+| frame | definition | used for |
+|---|---|---|
+| camera-local | current left camera | live stereo points, `LIVE` messages |
+| internal world | first tracked camera pose after start / reset; `X_int = R_wc X_cam + p_wc` | estimator integration, point map, trajectory |
+| reported | `X_rep = R_o^T (X_int − p_o)`; identity until RECENTER | published pose (`position`, `orientation`) |
+| Three.js | `X_three = C X_rep`, `C = diag(1, −1, −1)` | the browser scene |
+
+`C` is a 180° rotation about X, a **proper rotation** (determinant +1),
+not a mirror: `(x, y, z) -> (x, −y, −z)` and `q(x, y, z, w) ->
+(x, −y, −z, w)`. Verified against 2000 random rotations and asserted as
+check `D7`. The daemon never converts; the browser applies `C` once, at
+the root of its scene graph, and the origin inverse and camera pose
+below it - so no axis is flipped anywhere else:
 
 ```
-position    (x, y, z)     ->  (x, -y, -z)
-quaternion  (x, y, z, w)  ->  (x, -y, -z, w)
+scene ─ novexFrame (C) ─┬─ drone (reported pose)
+                        └─ internalFrame (O^-1) ─┬─ trajectory, map, mesh
+                                                 └─ liveFrame (T_wc) ─ live points
 ```
 
-The conversion happens in the browser; the daemon always emits Novex
-coordinates. It was verified numerically against 2000 random rotations
-before being written, and is asserted in the C++ suite as check `D7`.
-
-The world frame is the first tracked camera pose, so there is **no
-gravity alignment** — "up" is not known without a working IMU.
-
-Euler angles appear in the report and the dashboard for reading only.
-The estimator holds a quaternion throughout and never converts
-internally.
+The world frame has **no gravity alignment** - "up" is not known
+without a working IMU. Euler angles are for reading only; the estimator
+holds rotations throughout.
 
 ### Web API
 
 `GET /api/v1/state`, `/status`, `/performance`, `/debug`, `/camera`,
-`/health`; `POST /api/v1/vio/{reset,recenter,pause,resume}` and
-`/vio/{stereo,imu}?enabled=false`. Live updates come over WebSocket at
+`/diagnostics`, `/pointcloud`, `/health`;
+`POST /api/v1/vio/{reset,recenter,pause,resume}`,
+`/vio/{stereo,imu,stationary}?enabled=false` and `/map/clear`. Live updates come over WebSocket at
 `web.update_hz` (default 20 Hz) — deliberately below the 30 fps camera
 rate, since the dashboard cannot use more. Full table in
 [web/README.md](web/README.md).
 
 The daemon's own socket protocol gained `GET_DEBUG`, `GET_STATUS`,
-`GET_CAMERA`, `SUBSCRIBE <hz>`/`UNSUBSCRIBE`, and the control verbs, so
-`novex-state` and any other local consumer can use them too.
+`GET_CAMERA`, `GET_DIAGNOSTICS`, `SUBSCRIBE <hz>`/`UNSUBSCRIBE`,
+`SUBSCRIBE_POINTS <hz>`/`UNSUBSCRIBE_POINTS`, and the control verbs
+(including `STATIONARY on|off` and `CLEAR_MAP`), so `novex-state` and
+any other local consumer can use them too.
 
 ### Security posture
 
@@ -498,6 +755,118 @@ leave the machine. It has no authentication and can reset the
 estimator. `--web-host` exists but pointing it at `0.0.0.0` publishes
 unauthenticated control of the vehicle's estimator to the network — do
 not do that on a network you do not trust.
+
+---
+
+## Geometry diagnostics
+
+Computed every frame by the stage that owns each number, published in
+the state stream (`geometry`, `drift`, `stationary`, `pointCloud`
+objects), `GET_DIAGNOSTICS`, the dashboard, and the `--debug` report.
+None is estimated or smoothed; blocks that did not run this frame are
+flagged, not zero-filled.
+
+| stage | measurements |
+|---|---|
+| tracking | median / mean optical flow, tracks dropped, features detected |
+| stereo | points, rejections by cause (match / epipolar / depth), disparity median ± std (parallax angle in px), depth median / min / max / std, ray miss, **signed vertical offset** |
+| motion | accepted / rejected + reason, correspondences, inliers, inlier ratio, rejected correspondences, reprojection error median / max through the real fisheye model, 1σ rotation / translation, conditioning, keyframe span |
+| per-frame motion | relative rotation (magnitude + vector), relative translation (magnitude + vector), pose delta, velocity, speed |
+| run totals | motion estimates rejected, keyframes, unmeasured re-anchors, stereo matches rejected, correspondences rejected, accumulated and net rotation / translation |
+| point map | median innovation of new observations against their track's fused point (% of range) |
+
+Units: angular quantities are "centre-of-image pixels" (angle × focal
+length), since one pixel is close to a constant angle on this lens.
+
+### Stationary-camera test
+
+Start with `--stationary-test`, the dashboard button, or `STATIONARY on`.
+It **observes only**; it never suppresses motion. Over the window it
+reports mean ± std of per-frame relative translation and rotation, the
+mean motion *vector* with its significance (|mean| / standard error),
+optical flow, depth, reprojection error, inlier ratio, stereo offset,
+accumulated position / orientation drift - and the same drift
+re-composed **independently** from the raw keyframe-relative estimates
+and keyframe events. Then it names the stage the numbers point at:
+
+* **A tracking** - optical flow well above sensor noise;
+* **D integration** - the estimator's pose disagrees with the independent
+  re-composition;
+* **C motion estimation** (with a **B stereo** signature when the rays'
+  vertical offset is large) - consistent motion from still input;
+* otherwise, zero-mean noise and its random walk.
+
+---
+
+## 3D feature point cloud
+
+Every tracked feature with valid stereo depth is a 3D point, measured
+by the same left-ray stereo geometry the estimator uses. Nothing is
+synthesised.
+
+* **Live:** each frame's points, camera-local, with feature id,
+  quality, intensity, track age and flags, plus the camera pose they
+  were measured at (from the same message, never a later state).
+* **Map:** accepted points transformed with that frame's pose,
+  `P_world = R_wc P_camera + p_wc`, into the internal world frame.
+  Only frames with an accepted motion estimate contribute (a carried
+  pose would misplace points).
+* **Track fusion.** Range noise lies along the viewing ray, so repeated
+  observations of one feature used to scatter into a streak pointing at
+  the camera. Each track now fuses its observations by inverse range
+  variance (bounded to ~25 frames of memory) and *moves* its single map
+  point as the estimate sharpens. On `static100` the map went from 4968
+  streak voxels to 693 points, one per physical feature.
+* **Voxels + budget.** `voxel_size_m` (3 cm) merges different features
+  in the same cube; an open-addressing hash with backward-shift
+  deletion keeps lookup O(1) with no allocation. `max_points` (20000)
+  is a hard budget; when full, the stalest, lowest-quality slot is
+  evicted.
+* **Quality gates, map only** (configurable, each rejection counted by
+  cause): depth ≤ 6 m, relative range σ ≤ 15% at 1 px, ray miss ≤ the
+  stereo gate, track age ≥ 1, motion inlier. The live layer shows every
+  point, because it is a diagnostic.
+* **Quality score** (0-255, a ranking, not a probability): each of
+  range σ, ray miss and inlier status contributes a factor that is 1 for
+  a perfect measurement and 0.5 at the configured limit.
+
+### Transport
+
+Binary, little-endian, identical on the daemon socket and the browser
+WebSocket; layout in `include/PointCloud.hpp`. `LIVE` entries are
+20 bytes; `MAP` messages are **deltas** of 24-byte slot records.
+
+* The VIO thread copies into a shared snapshot with `try_lock` only - it
+  never waits for a reader; a busy snapshot is simply retried next frame.
+* Each daemon client has a byte-exact outbox. Droppable updates (state,
+  live points) are skipped while a client is behind; map deltas are
+  never cut mid-message. A client more than 16 MB behind is dropped.
+* Receivers hold `(epoch, generation)`. A delta brings a receiver from
+  its generation to the newest; a missed round is covered by the next;
+  reset / clear starts a new epoch and a full resend.
+* The Node relay keeps a map mirror and repeats the scheme **per
+  browser**, so a slow or late browser gets exactly what it lacks, and
+  subscribes to points only while a browser is connected.
+* Verified: a client rebuilding the map from deltas through both hops
+  matched the daemon exactly (test_web.sh), and test P5 checks the delta
+  scheme through inserts, merges, evictions, skipped publishes and a
+  clear.
+
+### Rendering
+
+One `THREE.Points` per layer over preallocated typed arrays, a small
+shader for size / brightness by range from the camera (nearer = larger
+and brighter), turbo depth colouring, optional fading by last-seen
+time, and GPU upload of only the changed slot range. Toggles: live
+points, accumulated map, trajectory, camera, mesh, feature-id colours,
+depth colouring, fading, grid; presettable from the URL
+(`?mesh=1&traj=0`).
+
+**Mesh (experimental, browser only):** at most every 600 ms, a Web
+Worker triangulates a copy of the map with local neighbourhood fans -
+PCA normal, angular ordering, and triangles only when every edge is
+under a configurable length. The point cloud remains the data; the
+daemon never waits for it.
 
 ---
 
@@ -645,10 +1014,16 @@ the growth towards the edge is consistent with the partial edge
 coverage during the calibration capture that `JOURNAL.md` already
 flags as an open problem.
 
-The epipolar threshold is set at 0.008 in normalised units (~2.3 px)
-to match what the data supports. **This is a calibration limitation,
-not something to tune away** — the fix is a recapture with better
-coverage at the edge of the lens.
+The epipolar gate is now an angle, `stereo.epipolar_threshold_px`
+= 2.5 px, the same at the centre and the edge (the old 0.008
+normalised-plane gate was ~13× stricter in the corners). The geometry
+audit's real-frame section measures the same limitation with the
+current matcher: median ray miss 1.26 px and a **systematic vertical
+offset of +0.86 px** between the eyes. **This is a calibration
+limitation, not something to tune away** — the fix is a recapture with
+better coverage at the edge of the lens. Since the drift fix it can no
+longer create rotation, and it is shown live as "stereo vertical
+offset" so a recalibration can be judged by it.
 
 ---
 
@@ -678,7 +1053,11 @@ coverage at the edge of the lens.
    gravity without observing several orientations, so the field stays
    zero rather than holding a number that looks like an estimate.
 8. **Depth beyond ~25 m is discarded** because at a 110 mm baseline it
-   is sub-pixel disparity, and therefore noise.
+   is sub-pixel disparity, and therefore noise. The point MAP is gated
+   tighter (6 m, 15% range σ at 1 px) because it is shown as geometry.
+9. **The crop-and-scale pixel-centre convention** is the measured one;
+   the alternative differs by 0.167 px, audited as a negligible 0.033°
+   common rotation.
 
 ---
 
@@ -691,21 +1070,32 @@ Stated plainly, so nothing here is mistaken for finished work.
   interface, which is adequate for the loosely coupled use here but
   caps the practical sample rate.
 - **The estimator is loosely coupled, by design.** Vision produces a
-  complete relative pose and that pose is integrated. There is no
-  joint state, no covariance, no IMU preintegration, no bundle
-  adjustment. Those need a measured camera-IMU extrinsic and time
-  offset to be worth anything.
+  complete pose relative to a keyframe, and that pose is composed. There
+  is no joint state, no IMU preintegration, no bundle adjustment. The
+  per-frame covariance is computed and published but not propagated.
+  Those need a measured camera-IMU extrinsic and time offset to be worth
+  anything.
 - **No gravity alignment and no accelerometer-based levelling.**
 - **No loop closure, no mapping, no relocalisation.** Out of scope per
   the brief. This is local odometry: it drifts, and nothing corrects
   it.
-- **No keyframing or local bundle adjustment.** Frame-to-frame PnP
-  only, so drift accumulates faster than a windowed estimator would.
-- **Absolute trajectory accuracy is unmeasured.** There is no ground
-  truth on this bench. The tests verify that the pipeline produces a
-  well-formed, plausible state at rate — they do **not** verify that
-  the trajectory is correct. Comparing against a measured path is the
-  obvious next piece of work.
+- **Keyframes, but no local bundle adjustment.** Each frame is PnP
+  against one keyframe; keyframes are not jointly optimised, so drift
+  still accumulates keyframe to keyframe.
+- **Accuracy is measured on two recordings only** - one 100 s
+  stationary, one 90 s handheld loop in a dim room - against a directly
+  measured start-to-end pose, not a motion-capture trajectory. The
+  loop result is at the noise level of a single run (±~2° / ±0.3 m
+  under single-parameter changes). More loops in varied scenes are the
+  obvious next step, and `novex-record` / `novex-replay` exist for it.
+- **Path length is not a drift metric.** With keyframes each frame is
+  measured afresh, so per-frame jitter inflates the summed path (24 m
+  on the 90 s loop). End-pose error against ground truth is the metric.
+- **The stereo calibration has a measured +0.86 px vertical offset**
+  between the eyes. A recalibration is recommended; nothing here
+  compensates for it.
+- **The mesh is experimental** and browser-side only: local fans over
+  the point map, not a surface reconstruction.
 - **Velocity is a low-passed finite difference of position**, not an
   estimated state.
 - **The camera-mode mapping rule is verified for 1280×720 → 640×480
@@ -719,20 +1109,35 @@ Stated plainly, so nothing here is mistaken for finished work.
 - **`web/tools/mock-daemon.js` emits synthetic data.** It is a test
   fixture for the transport and the UI. It proves nothing about the
   estimator and is labelled as such in the file itself.
-- **The dashboard is not tested in a real browser here.** The
-  transport, framing, API and coordinate maths are covered by automated
-  checks; the rendering has not been through an automated browser test.
+- **Browser rendering is checked by headless-Chrome screenshots only**
+  (live data, point map, mesh, no console errors), not by an automated
+  pixel test. The transport, delta sync, API and coordinate maths are
+  covered by automated checks.
+- **Nothing here has run on a Raspberry Pi Zero 2 W.** Every number is
+  from the development machine; the point cloud and diagnostics add
+  ~0.02 ms per frame there, which should be re-measured on the board.
 - **`--debug` overhead is measured on the development machine only**,
   like every other number in this file.
 
 ## What is verified
 
-* `./build/novex-vio-test` — 31 checks, all passing, 0 skipped, with a
+* `./build/novex-vio-test` — 39 checks, all passing, 0 skipped, with a
   camera attached. Includes the command queue, the debug histogram, the
-  `reset` / `recenter` distinction, and the axis conversion.
+  `reset` / `recenter` distinction, the axis conversion, and the P
+  series: points on their left ray, voxel dedup, budget eviction with
+  hash consistency, track point moves and merges, binary map deltas
+  reproducing the map exactly, stationary-test attribution, estimates
+  spanning rejected frames, and quality-score ordering.
+* `./build/novex-geometry-audit [--recording DIR]` — 20 checks against
+  known answers and real frames (see [Calibration audit](#calibration-audit)),
+  including that a stereo calibration error cannot manufacture motion
+  and that the published uncertainty matches the actual error.
 * `./tests/test_lifecycle.sh` — 10 checks: headless daemon start-up,
   out-of-process IPC, 20 concurrent clients, clean SIGTERM and SIGINT.
-* `./tests/test_web.sh` — the `--debug` / `--web` acceptance tests:
-  every mode combination, a stalled client failing to stall the VIO,
-  browser disconnect and reconnect, all four control commands, and a
+* `./tests/test_web.sh` — 29 checks: every mode combination, a stalled
+  client failing to stall the VIO (with binary point streaming active),
+  browser disconnect and reconnect, the control commands, the binary
+  point stream end to end (valid headers, full map then deltas, map
+  rebuilt from deltas equal to the daemon's), the diagnostics endpoint,
+  the stationary test from the API, clear-map keeping tracking, and a
   single debug report on exit with the Node child reaped.

@@ -105,8 +105,20 @@ bool VIOConfig::loadFile(const std::string& path)
 
     stereoEnabled = yaml.getBool("stereo.enabled", stereoEnabled);
 
-    stereoEpipolarThreshold =
-        yaml.getDouble("stereo.epipolar_threshold", stereoEpipolarThreshold);
+    stereoEpipolarThresholdPx =
+        yaml.getDouble("stereo.epipolar_threshold_px",
+                       stereoEpipolarThresholdPx);
+
+    if (yaml.has("stereo.epipolar_threshold"))
+    {
+        // Deliberately not converted: the old value lived on the
+        // normalised plane, where its meaning varied ~13x across the
+        // fisheye, so there is no single equivalent angle.
+        LOG_WARN(
+            "config: stereo.epipolar_threshold (normalised units) is "
+            "no longer used; set stereo.epipolar_threshold_px instead"
+        );
+    }
 
     stereoForwardBackwardThreshold =
         yaml.getDouble("stereo.fb_threshold_px",
@@ -123,6 +135,50 @@ bool VIOConfig::loadFile(const std::string& path)
 
     ransacIterations = yaml.getInt("motion.ransac_iterations", ransacIterations);
     ransacConfidence = yaml.getDouble("motion.ransac_confidence", ransacConfidence);
+
+    motionInlierThresholdPx =
+        yaml.getDouble("motion.inlier_threshold_px", motionInlierThresholdPx);
+
+    motionRefineIterations =
+        yaml.getInt("motion.refine_iterations", motionRefineIterations);
+
+    keyframeRetention =
+        yaml.getDouble("motion.keyframe_retention", keyframeRetention);
+
+    keyframeMaxSpan =
+        yaml.getInt("motion.keyframe_max_span", keyframeMaxSpan);
+
+    stationaryTestEnabled =
+        yaml.getBool("diagnostics.stationary_test", stationaryTestEnabled);
+
+    pointCloudEnabled = yaml.getBool("pointcloud.enabled", pointCloudEnabled);
+    pointMapEnabled = yaml.getBool("pointcloud.map_enabled", pointMapEnabled);
+
+    pointCloudMaxPoints =
+        yaml.getInt("pointcloud.max_points", pointCloudMaxPoints);
+
+    pointCloudVoxelSize =
+        yaml.getDouble("pointcloud.voxel_size_m", pointCloudVoxelSize);
+
+    pointCloudMaxDepth =
+        yaml.getDouble("pointcloud.max_depth_m", pointCloudMaxDepth);
+
+    pointCloudMaxDepthSigma =
+        yaml.getDouble("pointcloud.max_depth_sigma", pointCloudMaxDepthSigma);
+
+    pointCloudMaxStereoResidualPx =
+        yaml.getDouble("pointcloud.max_stereo_residual_px",
+                       pointCloudMaxStereoResidualPx);
+
+    pointCloudMinTrackAge =
+        yaml.getInt("pointcloud.min_track_age", pointCloudMinTrackAge);
+
+    pointCloudRequireInlier =
+        yaml.getBool("pointcloud.require_motion_inlier",
+                     pointCloudRequireInlier);
+
+    pointCloudPublishHz =
+        yaml.getDouble("pointcloud.publish_hz", pointCloudPublishHz);
 
     imuBackend    = yaml.getString("imu.backend", imuBackend);
     imuDevicePath = yaml.getString("imu.device_path", imuDevicePath);
@@ -194,6 +250,15 @@ void VIOConfig::printUsage()
         "  --no-stereo          disable stereo depth\n"
         "  --socket PATH        IPC socket path\n"
         "  --no-ipc             do not start the IPC server\n"
+        "\n"
+        "  --keyframe-retention R  new keyframe below this inlier\n"
+        "                       retention (0 = frame-to-frame)\n"
+        "  --stationary-test    collect drift statistics assuming the\n"
+        "                       camera is NOT moved (observes only)\n"
+        "  --no-pointcloud      do not build 3D point snapshots\n"
+        "  --no-point-map       live points only, no accumulated map\n"
+        "  --map-points N       point map budget (default 20000)\n"
+        "  --voxel-size M       map voxel edge in metres, 0 = off\n"
         "\n"
         "  --debug              Enable detailed runtime diagnostics\n"
         "                       (per-stage timing, percentiles, and a\n"
@@ -364,6 +429,30 @@ bool VIOConfig::parseCommandLine(int argc, char** argv, bool& shouldExit)
         {
             ipcEnabled = false;
         }
+        else if (needsValue("--keyframe-retention"))
+        {
+            keyframeRetention = std::atof(argv[++i]);
+        }
+        else if (std::strcmp(arg, "--stationary-test") == 0)
+        {
+            stationaryTestEnabled = true;
+        }
+        else if (std::strcmp(arg, "--no-pointcloud") == 0)
+        {
+            pointCloudEnabled = false;
+        }
+        else if (std::strcmp(arg, "--no-point-map") == 0)
+        {
+            pointMapEnabled = false;
+        }
+        else if (needsValue("--map-points"))
+        {
+            pointCloudMaxPoints = std::atoi(argv[++i]);
+        }
+        else if (needsValue("--voxel-size"))
+        {
+            pointCloudVoxelSize = std::atof(argv[++i]);
+        }
         else if (std::strcmp(arg, "--debug") == 0)
         {
             debugEnabled = true;
@@ -513,6 +602,49 @@ bool VIOConfig::validate() const
     {
         LOG_ERROR("config: stereo depth range is inverted or invalid");
         return false;
+    }
+
+    if (keyframeRetention < 0.0 || keyframeRetention >= 1.0 ||
+        keyframeMaxSpan < 1)
+    {
+        LOG_ERROR(
+            "config: motion.keyframe_retention must be in [0, 1) and "
+            "keyframe_max_span >= 1"
+        );
+
+        return false;
+    }
+
+    if (!(stereoEpipolarThresholdPx > 0.0) ||
+        !(motionInlierThresholdPx > 0.0))
+    {
+        LOG_ERROR("config: stereo / motion angular thresholds must be > 0");
+        return false;
+    }
+
+    if (pointCloudEnabled)
+    {
+        // Upper bound keeps a single map message and the browser's
+        // buffers within reason on a 512 MB board.
+        if (pointCloudMaxPoints < 100 || pointCloudMaxPoints > 500000)
+        {
+            LOG_ERROR(
+                "config: pointcloud.max_points must be 100..500000"
+            );
+
+            return false;
+        }
+
+        if (pointCloudVoxelSize < 0.0 ||
+            !(pointCloudPublishHz > 0.0) || pointCloudPublishHz > 60.0)
+        {
+            LOG_ERROR(
+                "config: pointcloud.voxel_size_m must be >= 0 and "
+                "publish_hz 0..60"
+            );
+
+            return false;
+        }
     }
 
     return true;

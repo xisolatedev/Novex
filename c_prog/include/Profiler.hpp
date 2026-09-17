@@ -21,6 +21,7 @@ enum class Stage
     Motion,           // PnP / RANSAC
     State,            // pose integration / estimator update
     Imu,              // IMU sample consumption
+    PointCloud,       // 3D point snapshot + map insertion + publish
     Total,            // whole frame, capture included
     Count
 };

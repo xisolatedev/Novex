@@ -9,6 +9,9 @@
 // need is a small subset - accept an upgrade, send text frames, honour
 // ping/pong and close - and that subset is short enough to own.
 //
+// Binary frames are sent for the point cloud stream (see
+// lib/pointcloud.js); incoming binary frames are ignored.
+//
 // Deliberately NOT implemented, because nothing here uses it:
 //   * permessage-deflate (state updates are small and frequent;
 //     compressing them would cost more CPU than it saves on loopback)
@@ -92,6 +95,25 @@ class Connection
 
     send(text)
     {
+        return this._write(OPCODE.TEXT, text, 1 << 20);
+    }
+
+    // Binary frames carry point cloud messages. The default limit is
+    // tighter than for text: a point message is large, and a browser
+    // that has not drained the last one gains nothing from a second.
+    sendBinary(buffer, limit = 256 << 10)
+    {
+        return this._write(OPCODE.BINARY, buffer, limit);
+    }
+
+    // Bytes accepted but not yet written to the network.
+    get pending()
+    {
+        return this.socket.destroyed ? Infinity : this.socket.writableLength;
+    }
+
+    _write(opcode, payload, limit)
+    {
         if (this.closed || this.socket.destroyed)
         {
             return false;
@@ -102,14 +124,14 @@ class Connection
         // rather than letting Node buffer it without limit. The next
         // state is more useful than a queue of stale ones, which is
         // the same rule the C++ side applies.
-        if (this.socket.writableLength > 1 << 20)
+        if (this.socket.writableLength > limit)
         {
             return false;
         }
 
         try
         {
-            this.socket.write(encodeFrame(OPCODE.TEXT, text));
+            this.socket.write(encodeFrame(opcode, payload));
             return true;
         }
         catch
@@ -262,6 +284,7 @@ class Connection
                 break;
 
             case OPCODE.PONG:
+            case OPCODE.BINARY:
                 break;
 
             case OPCODE.CLOSE:
@@ -277,11 +300,12 @@ class Connection
 
 class WebSocketServer
 {
-    constructor(httpServer, { onConnect, onMessage } = {})
+    constructor(httpServer, { onConnect, onMessage, onClose } = {})
     {
         this.connections = new Set();
         this.onConnect = onConnect;
         this.onMessage = onMessage;
+        this.onClose = onClose;
 
         httpServer.on('upgrade', (request, socket, head) =>
         {
@@ -353,7 +377,10 @@ class WebSocketServer
 
     _remove(connection)
     {
-        this.connections.delete(connection);
+        if (this.connections.delete(connection))
+        {
+            this.onClose?.(connection);
+        }
     }
 
     _message(connection, text)

@@ -26,10 +26,55 @@ struct Feature
 
     int age = 0;              // frames survived
 
-    // Position in the LEFT CAMERA frame of the frame in which it was
-    // last triangulated, in metres. Valid only while hasDepth is true.
+    // ---- live stereo measurement (THIS frame) ----
+    //
+    // Position in the current LEFT CAMERA frame, in metres, measured
+    // by stereo on the most recent frame. Valid only while hasDepth is
+    // true. The point lies exactly on the ray through `point`: the
+    // right eye contributes range along that ray and nothing else (see
+    // StereoMatcher::compute for why that matters).
     bool hasDepth = false;
     cv::Point3f position3D;
+
+    // Stereo quality, valid with hasDepth.
+    //   disparityPx      parallax angle between the two rays, in
+    //                    centre-of-image pixels (the fisheye analogue
+    //                    of disparity)
+    //   depthSigma       relative range uncertainty for one pixel of
+    //                    matching error, i.e. sigma_range / range
+    //   stereoResidualPx how far the two rays miss each other, as an
+    //                    angle in pixels - the epipolar inconsistency
+    float disparityPx = 0.0f;
+    float depthSigma = 0.0f;
+    float stereoResidualPx = 0.0f;
+
+    // ---- reference measurement used by motion estimation ----
+    //
+    // Position in the left camera frame of the REFERENCE frame - the
+    // last frame whose motion was accepted. Normally that is simply
+    // the previous frame, so this equals the previous frame's
+    // position3D. When a motion estimate is rejected the reference is
+    // deliberately NOT advanced, so the next estimate spans the gap
+    // instead of silently losing the rejected interval's motion.
+    bool hasReference = false;
+    cv::Point3f reference3D;
+
+    // Whether this feature was a RANSAC inlier in the latest accepted
+    // motion estimate. Used as a consistency filter for the point map.
+    bool motionInlier = false;
+
+    // ---- point map fusion ----
+    //
+    // Every accepted observation of this track, in the internal world
+    // frame, fused by inverse range variance. One physical feature
+    // becomes ONE map point that sharpens as it is re-observed, rather
+    // than a streak of independent noisy points along its viewing ray.
+    float fusedWorld[3] = {0.0f, 0.0f, 0.0f};
+    float fusedWeight = 0.0f;
+
+    // Map slot holding this track's point, or -1. Only a hint: the map
+    // confirms ownership before using it.
+    int32_t mapSlot = -1;
 };
 
 // Grid-distributed Shi-Tomasi detection plus pyramidal KLT tracking.

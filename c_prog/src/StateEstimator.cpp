@@ -72,6 +72,9 @@ void StateEstimator::reset()
     worldFromCamera = Eigen::Matrix3d::Identity();
     positionInWorld = Eigen::Vector3d::Zero();
 
+    referenceRotation = Eigen::Matrix3d::Identity();
+    referencePosition = Eigen::Vector3d::Zero();
+
     filteredVelocity.setZero();
 
     originRotation = Eigen::Matrix3d::Identity();
@@ -202,17 +205,25 @@ bool StateEstimator::gyroRotation(const std::vector<IMUSample>& samples,
 
 void StateEstimator::applyMotion(const MotionResult& motion,
                                  double timestamp,
-                                 double deltaTime)
+                                 double deltaTime,
+                                 bool advanceReference)
 {
     if (!motion.success)
     {
         return;
     }
 
-    // motion is X_current = R X_previous + t. The world pose composes
-    // with its inverse:
-    //   R_wc' = R_wc * R^T
-    //   t_wc' = t_wc - R_wc' * t
+    // motion is X_current = R X_reference + t. The world pose composes
+    // with its inverse, onto the REFERENCE pose:
+    //   R_wc' = R_wref * R^T
+    //   t_wc' = t_wref - R_wc' * t
+    //
+    // The reference is the KEYFRAME the 3D points were measured in.
+    // Composing onto it, rather than onto the previous frame's pose,
+    // means each frame's pose is measured afresh against that keyframe
+    // and per-frame errors do not integrate. It also keeps a rejected
+    // interval's motion instead of losing it, and ignores any gyro
+    // propagation applied while vision was lost.
     const Eigen::Matrix3d relativeRotation = fromCv(motion.rotation);
 
     const Eigen::Vector3d relativeTranslation(
@@ -223,16 +234,28 @@ void StateEstimator::applyMotion(const MotionResult& motion,
 
     const Eigen::Vector3d previousPosition = positionInWorld;
 
-    worldFromCamera = worldFromCamera * relativeRotation.transpose();
+    worldFromCamera = referenceRotation * relativeRotation.transpose();
     worldFromCamera = reorthonormalise(worldFromCamera);
 
     positionInWorld =
-        positionInWorld - worldFromCamera * relativeTranslation;
+        referencePosition - worldFromCamera * relativeTranslation;
 
-    if (deltaTime > 1e-6)
+    if (advanceReference)
+    {
+        referenceRotation = worldFromCamera;
+        referencePosition = positionInWorld;
+    }
+
+    // Velocity is the change since the last ACCEPTED pose over the time
+    // since it - not over `deltaTime`, which spans back to the keyframe.
+    const double velocityInterval = (initialised && timestamp > lastTimestamp)
+        ? timestamp - lastTimestamp
+        : deltaTime;
+
+    if (velocityInterval > 1e-6)
     {
         const Eigen::Vector3d instantaneous =
-            (positionInWorld - previousPosition) / deltaTime;
+            (positionInWorld - previousPosition) / velocityInterval;
 
         filteredVelocity = initialised
             ? filteredVelocity * (1.0 - kVelocityAlpha) +
@@ -249,6 +272,12 @@ void StateEstimator::applyMotion(const MotionResult& motion,
     current.lostFrames = 0;
 
     updatePublishedPose();
+}
+
+void StateEstimator::reanchorReference()
+{
+    referenceRotation = worldFromCamera;
+    referencePosition = positionInWorld;
 }
 
 void StateEstimator::applyTrackingLoss(

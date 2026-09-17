@@ -96,10 +96,17 @@ features:
 stereo:
   enabled: true
 
-  # Sampson distance in NORMALISED camera units, so it does not change
-  # meaning when the resolution does. 0.006 is roughly 1.7 px at the
-  # 640x480 focal length.
-  epipolar_threshold: 0.008
+  # How far the left and right rays may miss each other, as an ANGLE
+  # expressed in centre-of-image pixels. Angular so it means the same
+  # at the centre and the edge of the fisheye; the previous normalised-
+  # plane threshold (epipolar_threshold) was ~13x stricter in the
+  # corners than in the middle and is no longer read.
+  #
+  # Measured on this rig: median ray miss ~1.2 px, with a systematic
+  # vertical component of ~+0.9 px - a stereo calibration offset (see
+  # novex-geometry-audit --recording). Tightening this below ~1.5 px
+  # mostly discards the periphery.
+  epipolar_threshold_px: 2.5
 
   # Forward-backward threshold for the left-right match, in pixels.
   # Looser than the temporal one on purpose: the two images come from
@@ -116,10 +123,74 @@ stereo:
 motion:
   min_inliers: 12
 
-  # Also in normalised camera units.
+  # RANSAC HYPOTHESIS threshold, normalised camera units. It only
+  # proposes a pose; the final inliers are selected by angle below.
   ransac_error: 0.004
   ransac_iterations: 100
   ransac_confidence: 0.99
+
+  # Final inlier threshold, an angle in centre-of-image pixels, and the
+  # Gauss-Newton iterations of the robust refinement on bearing angles.
+  inlier_threshold_px: 1.5
+  refine_iterations: 8
+
+  # Keyframe-relative estimation. Each frame is measured against the 3D
+  # points of a keyframe instead of the previous frame, so per-frame
+  # errors do not integrate. A new keyframe is taken when the inliers
+  # linking to it drop below this fraction of its first estimate's, or
+  # after keyframe_max_span frames.
+  #
+  # 0 = frame-to-frame. Measured against ground truth (README, "Drift"):
+  # on a 90 s handheld loop frame-to-frame ends 35.6 deg / 2.24 m wrong,
+  # 0.7 ends 4.6 deg / 0.59 m wrong; on 100 s stationary, 6.0 deg /
+  # 0.17 m vs 0.83 deg / 0.035 m.
+  keyframe_retention: 0.7
+  keyframe_max_span: 300
+
+
+# ------------------------------------------------------------
+# 3D feature point cloud
+# ------------------------------------------------------------
+# Every tracked feature with valid stereo depth is a 3D point. Nothing
+# is synthesised. Live points are camera-local; the map is in the
+# estimator's internal world frame and shown through the recenter
+# origin. See include/PointCloud.hpp for frames and the wire format.
+pointcloud:
+  enabled: true
+
+  # Accumulate points into a world-space map.
+  map_enabled: true
+
+  # Map budget. When full, the stalest, lowest-quality points go.
+  max_points: 20000
+
+  # Voxel edge for deduplication, metres. 0 = no voxels (a ring of the
+  # most recent points). Repeated observations of the SAME tracked
+  # feature are fused into one point regardless of this.
+  voxel_size_m: 0.03
+
+  # Quality gates for the MAP only. The live view shows every stereo
+  # point, because it is a diagnostic too.
+  max_depth_m: 6.0
+  max_depth_sigma: 0.15          # relative range error at 1 px matching
+  max_stereo_residual_px: 2.5    # = stereo gate; tighter drops the edges
+  min_track_age: 1
+  require_motion_inlier: true
+
+  # Rate at which point snapshots are handed to the IPC server,
+  # independent of the VIO rate.
+  publish_hz: 15.0
+
+
+# ------------------------------------------------------------
+# Drift diagnostics
+# ------------------------------------------------------------
+diagnostics:
+  # --stationary-test. Collect drift statistics from start-up, assuming
+  # the camera is NOT moved. Observes only - motion is never altered.
+  # Can also be started / stopped from the dashboard or with
+  # "STATIONARY on|off" on the IPC socket.
+  stationary_test: false
 
 
 imu:

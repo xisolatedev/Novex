@@ -182,13 +182,69 @@ canvas {
 
 .ctl.checkbox { justify-content: flex-start; gap: 8px; }
 
-#hud {
+#help {
     position: fixed;
     left: 14px;
     bottom: 12px;
     font: 11px var(--mono);
     color: #4d5666;
     z-index: 8;
+}
+
+/* Live metrics over the 3D view. */
+#hud {
+    position: fixed;
+    top: 56px;
+    left: 14px;
+    padding: 10px 12px;
+    background: rgba(9, 13, 19, 0.72);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    backdrop-filter: blur(4px);
+    z-index: 8;
+    pointer-events: none;
+}
+
+.hud-grid {
+    display: grid;
+    grid-template-columns: auto auto;
+    column-gap: 14px;
+    row-gap: 1px;
+    font: 11px/1.5 var(--mono);
+}
+
+.hud-grid span { color: var(--dim); }
+.hud-grid b { font-weight: 500; text-align: right; color: var(--text); }
+.hud-sep { height: 1px; background: var(--line); margin: 6px 0; }
+
+#layers {
+    position: fixed;
+    left: 14px;
+    bottom: 34px;
+    padding: 8px 12px;
+    background: rgba(9, 13, 19, 0.72);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    backdrop-filter: blur(4px);
+    z-index: 8;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 12px;
+}
+
+#layers label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+#layers label em { font-style: normal; color: #5a6577; font-size: 10px; }
+#layers .sep { margin: 4px 0; }
+#layers .range { gap: 8px; color: var(--dim); }
+#layers input[type=range] { width: 96px; }
+
+.buttons { display: flex; gap: 8px; }
+
+@media (max-width: 900px) {
+    #panel { width: 100%; top: auto; height: 45vh; }
+    #hud { top: 52px; }
+    #layers { bottom: calc(45vh + 12px); }
 }
 
 .good { color: var(--good); }

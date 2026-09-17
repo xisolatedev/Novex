@@ -4,12 +4,14 @@
 #include "Time.hpp"
 
 #include <cerrno>
+#include <cstdarg>
 #include <cstdio>
 #include <algorithm>
 #include <cstdlib>
 #include <fcntl.h>
 #include <cstring>
 #include <poll.h>
+#include <pthread.h>
 #include <signal.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -20,6 +22,228 @@
 
 namespace novex
 {
+
+namespace
+{
+
+// A client more than this far behind is not a slow reader any more but
+// a stuck one, and holding megabytes for it on a 512 MB board helps
+// nobody. It is disconnected; it can reconnect and resynchronise.
+constexpr size_t kMaxOutboxBytes = 16u << 20;
+
+// Appends formatted text to a fixed buffer, tracking the offset and
+// never overrunning. Hand-built JSON, like everything else here: no
+// allocation and no dependency.
+class JsonWriter
+{
+public:
+
+    JsonWriter(char* buffer, size_t size) : buffer(buffer), size(size) {}
+
+    __attribute__((format(printf, 2, 3)))
+    void add(const char* format, ...)
+    {
+        if (used >= size)
+        {
+            return;
+        }
+
+        va_list arguments;
+        va_start(arguments, format);
+
+        const int written =
+            vsnprintf(buffer + used, size - used, format, arguments);
+
+        va_end(arguments);
+
+        if (written > 0)
+        {
+            used += static_cast<size_t>(written);
+        }
+    }
+
+    size_t length() const { return std::min(used, size); }
+
+private:
+
+    char* buffer;
+    size_t size;
+    size_t used = 0;
+};
+
+// Static strings only (failure reasons, indications); they contain no
+// characters needing escapes, but null must still become JSON null.
+void addString(JsonWriter& json, const char* key, const char* value)
+{
+    if (value == nullptr)
+    {
+        json.add("\"%s\":null", key);
+    }
+    else
+    {
+        json.add("\"%s\":\"%s\"", key, value);
+    }
+}
+
+// The geometry / drift / stationary / point cloud objects, shared by
+// the push stream and GET_DIAGNOSTICS so the two can never disagree.
+void addDiagnostics(JsonWriter& json, const VIOSnapshot& s,
+                    const PointCloudChannel::Summary& points,
+                    uint64_t pointBytes, uint64_t pointMessages)
+{
+    const FrameDiagnostics& g = s.diagnostics;
+
+    json.add("\"geometry\":{"
+             "\"frameId\":%llu,"
+             "\"flowMedianPx\":%.4f,\"flowMeanPx\":%.4f,"
+             "\"trackRejected\":%d,\"detected\":%d,"
+             "\"stereoValid\":%s,\"stereoAttempted\":%d,"
+             "\"stereoPoints\":%d,\"stereoRejected\":%d,"
+             "\"stereoRejectedMatch\":%d,\"stereoRejectedEpipolar\":%d,"
+             "\"stereoRejectedDepth\":%d,"
+             "\"disparityMedianPx\":%.3f,\"disparityStdPx\":%.3f,"
+             "\"depthMedian\":%.4f,\"depthMin\":%.4f,\"depthMax\":%.4f,"
+             "\"depthStd\":%.4f,"
+             "\"stereoResidualPx\":%.4f,\"stereoVerticalOffsetPx\":%.4f,",
+             static_cast<unsigned long long>(g.frameId),
+             g.flowMedianPx, g.flowMeanPx,
+             g.trackRejected, g.detectedFeatures,
+             g.stereoValid ? "true" : "false", g.stereoAttempted,
+             g.stereoPoints, g.stereoRejected,
+             g.stereoRejectedMatch, g.stereoRejectedEpipolar,
+             g.stereoRejectedDepth,
+             g.disparityMedianPx, g.disparityStdPx,
+             g.depthMedian, g.depthMin, g.depthMax, g.depthStd,
+             g.stereoResidualMedianPx, g.stereoVerticalOffsetPx);
+
+    json.add("\"motionAttempted\":%s,\"motionAccepted\":%s,",
+             g.motionAttempted ? "true" : "false",
+             g.motionAccepted ? "true" : "false");
+
+    addString(json, "motionRejectReason", g.motionRejectReason);
+
+    json.add(",\"correspondences\":%d,\"inliers\":%d,"
+             "\"rejectedCorrespondences\":%d,\"inlierRatio\":%.4f,"
+             "\"reprojectionMedianPx\":%.4f,\"reprojectionMaxPx\":%.4f,"
+             "\"rotationSigmaDeg\":%.5f,\"translationSigmaMm\":%.4f,"
+             "\"conditioning\":%.3e,\"referenceSpan\":%d,"
+             "\"relativeRotationDeg\":%.5f,\"relativeTranslationMm\":%.4f,"
+             "\"relativeRotationVectorDeg\":[%.5f,%.5f,%.5f],"
+             "\"relativeTranslationVectorMm\":[%.4f,%.4f,%.4f],"
+             "\"speed\":%.4f,\"poseDeltaMm\":%.4f,\"poseDeltaDeg\":%.5f,"
+             "\"motionRejectedTotal\":%llu,\"referenceResetsTotal\":%llu,"
+             "\"stereoRejectedTotal\":%llu,"
+             "\"correspondencesRejectedTotal\":%llu},",
+             g.correspondences, g.inliers,
+             g.rejectedCorrespondences, g.inlierRatio,
+             g.reprojectionMedianPx, g.reprojectionMaxPx,
+             g.rotationSigmaDeg, g.translationSigmaMm,
+             g.conditioning, g.referenceSpanFrames,
+             g.relativeRotationDeg, g.relativeTranslationM * 1e3,
+             g.relativeRotationVector[0] * 57.29577951308232,
+             g.relativeRotationVector[1] * 57.29577951308232,
+             g.relativeRotationVector[2] * 57.29577951308232,
+             g.relativeTranslation[0] * 1e3,
+             g.relativeTranslation[1] * 1e3,
+             g.relativeTranslation[2] * 1e3,
+             g.speed, g.poseDeltaM * 1e3, g.poseDeltaDeg,
+             static_cast<unsigned long long>(g.motionRejectedTotal),
+             static_cast<unsigned long long>(g.referenceResetsTotal),
+             static_cast<unsigned long long>(g.stereoRejectedTotal),
+             static_cast<unsigned long long>(g.correspondencesRejectedTotal));
+
+    json.add("\"drift\":{\"accumulatedRotationDeg\":%.4f,"
+             "\"accumulatedTranslationM\":%.5f,"
+             "\"netRotationDeg\":%.4f,\"netTranslationM\":%.5f},",
+             g.accumulatedRotationDeg, g.accumulatedTranslationM,
+             g.netRotationDeg, g.netTranslationM);
+
+    const StationaryReport& r = s.stationary;
+
+    json.add("\"stationary\":{\"active\":%s,\"haveData\":%s,"
+             "\"durationS\":%.2f,\"frames\":%llu,\"accepted\":%llu,"
+             "\"rejected\":%llu,"
+             "\"translationMeanMm\":%.4f,\"translationStdMm\":%.4f,"
+             "\"translationBiasMm\":[%.5f,%.5f,%.5f],"
+             "\"translationBiasSigma\":%.2f,"
+             "\"rotationMeanDeg\":%.5f,\"rotationStdDeg\":%.5f,"
+             "\"rotationBiasDeg\":[%.6f,%.6f,%.6f],"
+             "\"rotationBiasSigma\":%.2f,"
+             "\"flowPx\":%.4f,\"depthMedianM\":%.3f,"
+             "\"reprojectionPx\":%.4f,\"inlierRatio\":%.4f,"
+             "\"stereoResidualPx\":%.4f,\"stereoVerticalOffsetPx\":%.4f,"
+             "\"positionDriftM\":%.5f,"
+             "\"positionDrift\":[%.5f,%.5f,%.5f],"
+             "\"orientationDriftDeg\":%.4f,"
+             "\"measuredPositionDriftM\":%.5f,"
+             "\"measuredOrientationDriftDeg\":%.4f,",
+             r.active ? "true" : "false", r.haveData ? "true" : "false",
+             r.durationSeconds,
+             static_cast<unsigned long long>(r.frames),
+             static_cast<unsigned long long>(r.acceptedEstimates),
+             static_cast<unsigned long long>(r.rejectedEstimates),
+             r.translationMeanMm, r.translationStdMm,
+             r.translationBiasMm[0], r.translationBiasMm[1],
+             r.translationBiasMm[2], r.translationBiasSignificance,
+             r.rotationMeanDeg, r.rotationStdDeg,
+             r.rotationBiasDeg[0], r.rotationBiasDeg[1],
+             r.rotationBiasDeg[2], r.rotationBiasSignificance,
+             r.flowMeanPx, r.depthMedianM,
+             r.reprojectionMedianPx, r.inlierRatio,
+             r.stereoResidualPx, r.stereoVerticalOffsetPx,
+             r.positionDriftM,
+             r.positionDrift[0], r.positionDrift[1], r.positionDrift[2],
+             r.orientationDriftDeg,
+             r.measuredPositionDriftM, r.measuredOrientationDriftDeg);
+
+    addString(json, "indication", r.indication);
+
+    const PointCloudCounters& c = s.pointCounters;
+
+    json.add("},\"pointCloud\":{\"enabled\":%s,\"mapEnabled\":%s,"
+             "\"livePoints\":%zu,\"mapPoints\":%zu,\"mapCapacity\":%zu,"
+             "\"voxelSize\":%.4f,\"mapEpoch\":%u,"
+             "\"generated\":%llu,\"accepted\":%llu,\"rejected\":%llu,"
+             "\"rejectedDepth\":%llu,\"rejectedUncertainty\":%llu,"
+             "\"rejectedResidual\":%llu,\"rejectedTrackAge\":%llu,"
+             "\"rejectedNotInlier\":%llu,\"rejectedNoPose\":%llu,"
+             "\"mapInserted\":%llu,\"mapMerged\":%llu,\"mapRefined\":%llu,"
+             "\"mapEvicted\":%llu,\"innovationPct\":%.3f,"
+             "\"innovationSamples\":%d,"
+             "\"publishSkipped\":%llu,\"bytesSent\":%llu,"
+             "\"messagesSent\":%llu},",
+             s.pointCloudEnabled ? "true" : "false",
+             s.pointMapEnabled ? "true" : "false",
+             s.livePoints, s.mapPoints, s.mapCapacity,
+             s.voxelSize, s.mapEpoch,
+             static_cast<unsigned long long>(c.generated),
+             static_cast<unsigned long long>(c.accepted),
+             static_cast<unsigned long long>(c.rejected()),
+             static_cast<unsigned long long>(c.rejectedDepth),
+             static_cast<unsigned long long>(c.rejectedUncertainty),
+             static_cast<unsigned long long>(c.rejectedResidual),
+             static_cast<unsigned long long>(c.rejectedTrackAge),
+             static_cast<unsigned long long>(c.rejectedNotInlier),
+             static_cast<unsigned long long>(c.rejectedNoPose),
+             static_cast<unsigned long long>(c.mapInserted),
+             static_cast<unsigned long long>(c.mapMerged),
+             static_cast<unsigned long long>(c.mapRefined),
+             static_cast<unsigned long long>(c.mapEvicted),
+             g.mapInnovationMedianPct, g.mapInnovationSamples,
+             static_cast<unsigned long long>(points.publishSkipped),
+             static_cast<unsigned long long>(pointBytes),
+             static_cast<unsigned long long>(pointMessages));
+
+    json.add("\"origin\":{\"orientation\":{\"x\":%.9f,\"y\":%.9f,"
+             "\"z\":%.9f,\"w\":%.9f},"
+             "\"position\":{\"x\":%.6f,\"y\":%.6f,\"z\":%.6f}}",
+             s.originOrientation.x(), s.originOrientation.y(),
+             s.originOrientation.z(), s.originOrientation.w(),
+             s.originPosition.x(), s.originPosition.y(),
+             s.originPosition.z());
+}
+
+} // namespace
 
 StateServer::StateServer(const VIOConfig& config, VIO& vio)
     : config(config), vio(vio), path(config.ipcSocketPath)
@@ -162,6 +386,10 @@ void StateServer::serveLoop()
     // the difference between one dropped client and a dead VIO.
     ::signal(SIGPIPE, SIG_IGN);
 
+    // Named so its CPU cost - which is the whole daemon-side cost of
+    // serving the dashboard - can be read per thread in top or /proc.
+    ::pthread_setname_np(::pthread_self(), "novex-ipc");
+
     std::vector<pollfd> descriptors;
 
     descriptors.reserve(
@@ -190,9 +418,18 @@ void StateServer::serveLoop()
             entry.events = POLLIN;
             entry.revents = 0;
 
+            // Only ask to be woken for writability while something is
+            // actually waiting to go out; otherwise poll would return
+            // immediately forever.
+            if (client.outboxOffset < client.outbox.size())
+            {
+                entry.events |= POLLOUT;
+            }
+
             descriptors.push_back(entry);
 
-            anySubscribed = anySubscribed || client.subscribed;
+            anySubscribed = anySubscribed || client.subscribed ||
+                            client.pointsSubscribed;
         }
 
         // A bounded timeout is what makes shutdown prompt without
@@ -300,7 +537,12 @@ void StateServer::serveLoop()
 
             bool keep = true;
 
-            if (events & POLLIN)
+            if (events & POLLOUT)
+            {
+                keep = flush(*client);
+            }
+
+            if (keep && (events & POLLIN))
             {
                 char input[128];
 
@@ -368,13 +610,20 @@ void StateServer::serveLoop()
 
 void StateServer::pushSubscriptions(double now)
 {
-    char message[4096];
+    // Sized for the full stream object, which carries geometry and
+    // point cloud diagnostics as well as the state.
+    char message[16384];
 
     size_t length = 0;
     bool formatted = false;
 
     for (Client& client : clients)
     {
+        if (client.pointsSubscribed)
+        {
+            pushPoints(client, now);
+        }
+
         if (!client.subscribed || now < client.nextSendTime)
         {
             continue;
@@ -396,27 +645,150 @@ void StateServer::pushSubscriptions(double now)
 
         client.nextSendTime = now + client.intervalSeconds;
 
-        // Non-blocking. If the receiver has not drained its socket we
-        // simply skip this update: the next one carries newer data
+        // Droppable. If the receiver has not drained what it already
+        // has, this update is skipped: the next one carries newer data
         // anyway, and queueing stale states would only add latency.
-        const ssize_t sent = ::send(
-            client.fd,
-            message,
-            length,
-            MSG_NOSIGNAL | MSG_DONTWAIT
-        );
+        bool closeClient = false;
 
-        if (sent >= 0)
+        if (deliver(client, reinterpret_cast<const uint8_t*>(message),
+                    length, true, closeClient))
         {
             served.fetch_add(1);
+        }
+
+        if (closeClient)
+        {
+            // Not closed here: the poll round still holds this fd.
+            // Shutting it down makes the next poll report a hang-up,
+            // and the normal path closes and removes it.
+            ::shutdown(client.fd, SHUT_RDWR);
         }
     }
 }
 
-bool StateServer::sendLine(int clientFd, const char* data, size_t length)
+void StateServer::pushPoints(Client& client, double now)
 {
-    const ssize_t sent = ::send(
-        clientFd,
+    if (now < client.nextPointsTime)
+    {
+        return;
+    }
+
+    client.nextPointsTime = now + client.pointsInterval;
+
+    // Behind: skip this round entirely. The live points are superseded
+    // by the next ones, and the map delta is not lost - the client's
+    // generation has not advanced, so the next delta covers it.
+    if (client.outboxOffset < client.outbox.size())
+    {
+        ++client.droppedUpdates;
+        return;
+    }
+
+    PointCloudChannel& channel = vio.pointChannel();
+
+    // Each message is framed as "BIN <n>\n" + n bytes, and both kinds go
+    // out in one write so the whole round is delivered or skipped as a
+    // unit. Payloads are built into a reused scratch buffer.
+    std::vector<uint8_t>& out = pointScratch;
+    std::vector<uint8_t>& payload = pointPayload;
+
+    out.clear();
+
+    size_t messages = 0;
+
+    auto append = [&]()
+    {
+        char line[32];
+
+        const int lineLength =
+            snprintf(line, sizeof(line), "BIN %zu\n", payload.size());
+
+        out.insert(out.end(), line, line + lineLength);
+        out.insert(out.end(), payload.begin(), payload.end());
+
+        ++messages;
+    };
+
+    payload.clear();
+
+    if (channel.appendLive(payload, client.liveSequence) > 0)
+    {
+        append();
+    }
+
+    payload.clear();
+
+    if (channel.appendMapDelta(payload, client.mapEpoch,
+                               client.mapGeneration) > 0)
+    {
+        append();
+    }
+
+    if (messages == 0)
+    {
+        return;
+    }
+
+    // Not droppable: the map delta has already advanced this client's
+    // generation, so it must arrive complete.
+    bool closeClient = false;
+
+    deliver(client, out.data(), out.size(), false, closeClient);
+
+    if (closeClient)
+    {
+        LOG_WARN_EVERY(
+            5.0,
+            "ipc: point subscriber fell more than %zu MB behind; "
+            "disconnecting it",
+            kMaxOutboxBytes >> 20
+        );
+
+        // Closed on the next poll round, which sees the hang-up.
+        ::shutdown(client.fd, SHUT_RDWR);
+        return;
+    }
+
+    pointBytes.fetch_add(out.size());
+    pointMessages.fetch_add(messages);
+}
+
+bool StateServer::deliver(Client& client,
+                          const uint8_t* data,
+                          size_t length,
+                          bool droppable,
+                          bool& closeClient)
+{
+    closeClient = false;
+
+    if (client.outboxOffset < client.outbox.size())
+    {
+        if (droppable)
+        {
+            ++client.droppedUpdates;
+            return false;
+        }
+
+        if (client.outbox.size() - client.outboxOffset + length >
+            kMaxOutboxBytes)
+        {
+            closeClient = true;
+            return false;
+        }
+
+        const size_t held = client.outbox.size();
+
+        client.outbox.resize(held + length);
+        std::memcpy(client.outbox.data() + held, data, length);
+
+        return true;
+    }
+
+    client.outbox.clear();
+    client.outboxOffset = 0;
+
+    ssize_t sent = ::send(
+        client.fd,
         data,
         length,
         MSG_NOSIGNAL | MSG_DONTWAIT
@@ -424,16 +796,69 @@ bool StateServer::sendLine(int clientFd, const char* data, size_t length)
 
     if (sent < 0)
     {
-        if (errno == EAGAIN || errno == EWOULDBLOCK)
+        if (errno != EAGAIN && errno != EWOULDBLOCK)
         {
-            LOG_WARN_EVERY(
-                5.0,
-                "ipc: client is not reading; dropping reply"
-            );
-
-            return true;
+            closeClient = true;
+            return false;
         }
 
+        if (droppable)
+        {
+            ++client.droppedUpdates;
+            return false;
+        }
+
+        sent = 0;
+    }
+
+    // A partial write cannot be dropped any more - the receiver has
+    // the first half of a message - so the rest is queued, droppable
+    // or not.
+    if (static_cast<size_t>(sent) < length)
+    {
+        const size_t remaining = length - static_cast<size_t>(sent);
+
+        client.outbox.resize(remaining);
+        std::memcpy(client.outbox.data(), data + sent, remaining);
+    }
+
+    return true;
+}
+
+bool StateServer::flush(Client& client)
+{
+    while (client.outboxOffset < client.outbox.size())
+    {
+        const ssize_t sent = ::send(
+            client.fd,
+            client.outbox.data() + client.outboxOffset,
+            client.outbox.size() - client.outboxOffset,
+            MSG_NOSIGNAL | MSG_DONTWAIT
+        );
+
+        if (sent < 0)
+        {
+            return errno == EAGAIN || errno == EWOULDBLOCK;
+        }
+
+        client.outboxOffset += static_cast<size_t>(sent);
+    }
+
+    client.outbox.clear();
+    client.outboxOffset = 0;
+
+    return true;
+}
+
+bool StateServer::sendLine(Client& client, const char* data, size_t length)
+{
+    bool closeClient = false;
+
+    deliver(client, reinterpret_cast<const uint8_t*>(data), length, false,
+            closeClient);
+
+    if (closeClient)
+    {
         return false;
     }
 
@@ -662,6 +1087,20 @@ size_t StateServer::formatCamera(char* buffer, size_t size) const
     ));
 }
 
+size_t StateServer::formatDiagnostics(char* buffer, size_t size) const
+{
+    const VIOSnapshot s = vio.snapshot();
+
+    JsonWriter json(buffer, size);
+
+    json.add("{");
+    addDiagnostics(json, s, vio.pointChannel().summary(),
+                   pointBytes.load(), pointMessages.load());
+    json.add("}\n");
+
+    return json.length();
+}
+
 size_t StateServer::formatStream(char* buffer, size_t size) const
 {
     const VIOSnapshot s = vio.snapshot();
@@ -675,7 +1114,7 @@ size_t StateServer::formatStream(char* buffer, size_t size) const
     // messages. Position and orientation stay in NOVEX coordinates
     // here; the conversion to Three.js axes happens in the browser,
     // where it is documented alongside the scene setup.
-    return static_cast<size_t>(snprintf(
+    const int head = snprintf(
         buffer,
         size,
         "{\"type\":\"vio_state\","
@@ -704,13 +1143,14 @@ size_t StateServer::formatStream(char* buffer, size_t size) const
         "\"timing\":{"
             "\"totalMs\":%.3f,\"captureMs\":%.3f,\"decodeMs\":%.3f,"
             "\"detectMs\":%.3f,\"trackMs\":%.3f,\"stereoMs\":%.3f,"
-            "\"motionMs\":%.3f,\"stateMs\":%.3f,\"imuMs\":%.3f},"
+            "\"motionMs\":%.3f,\"stateMs\":%.3f,\"imuMs\":%.3f,"
+            "\"pointsMs\":%.3f},"
         "\"debug\":{\"enabled\":%s,"
             "\"runtimeS\":%.2f,\"framesProcessed\":%llu,"
             "\"avgFrameMs\":%.3f,\"minFrameMs\":%.3f,"
             "\"maxFrameMs\":%.3f,\"trackingFailures\":%llu,"
             "\"avgFeatures\":%.1f,\"imuSamples\":%llu,"
-            "\"trajectoryM\":%.4f}}\n",
+            "\"trajectoryM\":%.4f},",
         st.timestamp,
         st.position.x(), st.position.y(), st.position.z(),
         st.velocity.x(), st.velocity.y(), st.velocity.z(),
@@ -743,6 +1183,7 @@ size_t StateServer::formatStream(char* buffer, size_t size) const
         stage[static_cast<int>(Stage::Motion)],
         stage[static_cast<int>(Stage::State)],
         stage[static_cast<int>(Stage::Imu)],
+        stage[static_cast<int>(Stage::PointCloud)],
         d.enabled ? "true" : "false",
         d.runtimeSeconds,
         static_cast<unsigned long long>(d.framesProcessed),
@@ -753,13 +1194,27 @@ size_t StateServer::formatStream(char* buffer, size_t size) const
         d.averageTrackedFeatures,
         static_cast<unsigned long long>(d.imuSamples),
         d.trajectoryDistanceMeters
-    ));
+    );
+
+    if (head <= 0 || static_cast<size_t>(head) >= size)
+    {
+        return static_cast<size_t>(std::max(head, 0));
+    }
+
+    JsonWriter json(buffer + head, size - static_cast<size_t>(head));
+
+    addDiagnostics(json, s, vio.pointChannel().summary(),
+                   pointBytes.load(), pointMessages.load());
+
+    json.add("}\n");
+
+    return static_cast<size_t>(head) + json.length();
 }
 
 bool StateServer::handleCommand(Client& client,
                                 const std::string& command)
 {
-    char response[4096];
+    char response[8192];
     size_t length = 0;
 
     // Split into a verb and an optional argument.
@@ -826,6 +1281,47 @@ bool StateServer::handleCommand(Client& client,
             "{\"subscribed\":true,\"hz\":%.2f}\n", hz
         ));
     }
+    else if (verb == "GET_DIAGNOSTICS")
+    {
+        length = formatDiagnostics(response, sizeof(response));
+    }
+    else if (verb == "SUBSCRIBE_POINTS")
+    {
+        double hz = 10.0;
+
+        if (!argument.empty())
+        {
+            hz = std::strtod(argument.c_str(), nullptr);
+        }
+
+        if (!(hz > 0.0))
+        {
+            hz = 1.0;
+        }
+
+        hz = std::min(hz, 30.0);
+
+        client.pointsSubscribed = true;
+        client.pointsInterval = 1.0 / hz;
+        client.nextPointsTime = 0.0;
+
+        length = static_cast<size_t>(snprintf(
+            response, sizeof(response),
+            "{\"pointsSubscribed\":true,\"hz\":%.2f,"
+            "\"enabled\":%s}\n",
+            hz, config.pointCloudEnabled ? "true" : "false"
+        ));
+    }
+    else if (verb == "UNSUBSCRIBE_POINTS")
+    {
+        // The client's map epoch / generation are kept: a later
+        // SUBSCRIBE_POINTS continues with deltas from where it was.
+        client.pointsSubscribed = false;
+
+        length = static_cast<size_t>(snprintf(
+            response, sizeof(response), "{\"pointsSubscribed\":false}\n"
+        ));
+    }
     else if (verb == "UNSUBSCRIBE")
     {
         client.subscribed = false;
@@ -882,7 +1378,7 @@ bool StateServer::handleCommand(Client& client,
         length = sizeof(response) - 1;
     }
 
-    return sendLine(client.fd, response, length);
+    return sendLine(client, response, length);
 }
 
 } // namespace novex

@@ -14,11 +14,50 @@
     <span class="brand">NOVEX VIO</span>
     <span id="link-state" class="pill pill-bad">disconnected</span>
     <span id="origin-state" class="pill pill-idle" hidden>Origin: RECENTERED</span>
+    <span id="motion-state" class="pill pill-idle" hidden>—</span>
     <span class="spacer"></span>
-    <button id="btn-recenter" title="Redefine the reported origin. Tracking is NOT reset.">Recenter</button>
+    <button id="btn-recenter" title="Redefine the reported origin. Tracking is NOT reset; the map and trajectory move with the new frame.">Recenter</button>
     <button id="btn-pause">Pause</button>
-    <button id="btn-reset" class="danger" title="Restart tracking and the estimator.">Reset</button>
+    <button id="btn-resume">Resume</button>
+    <button id="btn-clear-map" title="Drop the accumulated point map. Tracking is untouched.">Clear map</button>
+    <button id="btn-reset" class="danger" title="Restart tracking, the estimator and the point map.">Reset</button>
 </header>
+
+<!-- Live overlay over the 3D view. Every value is a daemon measurement. -->
+<div id="hud">
+    <div class="hud-grid">
+        <span>VIO</span><b id="h-viofps">—</b>
+        <span>Camera</span><b id="h-camfps">—</b>
+        <span>Features</span><b id="h-features">—</b>
+        <span>Stereo pts</span><b id="h-stereo">—</b>
+        <span>Inliers</span><b id="h-inliers">—</b>
+        <span>Median depth</span><b id="h-depth">—</b>
+        <span>Reproj err</span><b id="h-reproj">—</b>
+        <span>Rel rot</span><b id="h-relrot">—</b>
+        <span>Rel trans</span><b id="h-reltrans">—</b>
+    </div>
+    <div class="hud-sep"></div>
+    <div class="hud-grid">
+        <span>Position</span><b id="h-pos" class="num">—</b>
+        <span>Velocity</span><b id="h-vel" class="num">—</b>
+        <span>R / P / Y</span><b id="h-rpy" class="num">—</b>
+    </div>
+</div>
+
+<div id="layers">
+    <label><input id="l-live" type="checkbox" checked> Live points</label>
+    <label><input id="l-map" type="checkbox" checked> Accumulated map</label>
+    <label><input id="l-traj" type="checkbox" checked> Trajectory</label>
+    <label><input id="l-camera" type="checkbox" checked> Camera</label>
+    <label><input id="l-mesh" type="checkbox"> Mesh <em>(experimental)</em></label>
+    <div class="sep"></div>
+    <label><input id="l-ids" type="checkbox"> Feature ID colours</label>
+    <label><input id="l-depth" type="checkbox" checked> Depth colouring</label>
+    <label><input id="l-fade" type="checkbox" checked> Fade old points</label>
+    <label><input id="l-grid" type="checkbox" checked> Grid</label>
+    <label class="range">Point size
+        <input id="l-size" type="range" min="0.005" max="0.08" step="0.005" value="0.025"></label>
+</div>
 
 <aside id="panel">
 
@@ -26,7 +65,7 @@
         <h2>VIO Status</h2>
         <div class="row"><span>VIO</span><b id="s-vio">—</b></div>
         <div class="row"><span>Tracking</span><b id="s-tracking">—</b></div>
-        <div class="row"><span>Features</span><b id="s-features">—</b></div>
+        <div class="row"><span>Last estimate</span><b id="s-motion">—</b></div>
         <div class="row"><span>Stereo</span><b id="s-stereo">—</b></div>
         <div class="row"><span>IMU</span><b id="s-imu">—</b></div>
     </section>
@@ -37,14 +76,95 @@
         <div class="row"><span>VIO FPS</span><b id="p-viofps">—</b></div>
         <div class="row"><span>Latency</span><b id="p-latency">—</b></div>
         <div class="sep"></div>
-        <div class="row"><span>Frame</span><b id="p-frame">—</b></div>
+        <div class="row"><span>Capture <em>(wait)</em></span><b id="p-capture">—</b></div>
         <div class="row"><span>Decode</span><b id="p-decode">—</b></div>
         <div class="row"><span>Detection</span><b id="p-detect">—</b></div>
         <div class="row"><span>Tracking</span><b id="p-track">—</b></div>
         <div class="row"><span>Stereo</span><b id="p-stereo">—</b></div>
         <div class="row"><span>Motion</span><b id="p-motion">—</b></div>
+        <div class="row"><span>Point cloud</span><b id="p-points">—</b></div>
         <div class="row"><span>State</span><b id="p-state">—</b></div>
-        <div class="row"><span>IMU</span><b id="p-imu">—</b></div>
+        <div class="row"><span>Total frame</span><b id="p-frame">—</b></div>
+    </section>
+
+    <section>
+        <h2>Geometry <span class="note">this frame</span></h2>
+        <div class="row"><span>Flow median / mean</span><b id="g-flow">—</b></div>
+        <div class="row"><span>Disparity median ± std</span><b id="g-disp">—</b></div>
+        <div class="row"><span>Depth median</span><b id="g-depth">—</b></div>
+        <div class="row"><span>Depth min / max</span><b id="g-depthrange">—</b></div>
+        <div class="row"><span>Depth std</span><b id="g-depthstd">—</b></div>
+        <div class="row"><span>Stereo points / rejected</span><b id="g-stereo">—</b></div>
+        <div class="row"><span>&nbsp; match / epipolar / depth</span><b id="g-stereorej">—</b></div>
+        <div class="row"><span>Stereo ray miss</span><b id="g-miss">—</b></div>
+        <div class="row"><span>Stereo vertical offset</span><b id="g-vert">—</b></div>
+        <div class="sep"></div>
+        <div class="row"><span>Inliers / correspondences</span><b id="g-inliers">—</b></div>
+        <div class="row"><span>Inlier ratio</span><b id="g-ratio">—</b></div>
+        <div class="row"><span>Reproj median / max</span><b id="g-reproj">—</b></div>
+        <div class="row"><span>1σ rot / trans</span><b id="g-sigma">—</b></div>
+        <div class="row"><span>Relative rotation</span><b id="g-relrot">—</b></div>
+        <div class="row"><span>Relative translation</span><b id="g-reltrans">—</b></div>
+        <div class="row"><span>Pose delta</span><b id="g-posedelta">—</b></div>
+        <div class="row"><span>Speed</span><b id="g-speed">—</b></div>
+        <div class="row"><span>Estimate span (frames)</span><b id="g-span">—</b></div>
+        <div class="sep"></div>
+        <div class="row"><span>Motion estimates rejected</span><b id="g-motionrej">—</b></div>
+        <div class="row"><span>Re-anchors (unmeasured)</span><b id="g-reanchor">—</b></div>
+        <div class="row"><span>Stereo matches rejected</span><b id="g-stereorejtotal">—</b></div>
+        <div class="row"><span>Correspondences rejected</span><b id="g-corrrej">—</b></div>
+    </section>
+
+    <section>
+        <h2>Drift <span class="note">since start / reset</span></h2>
+        <div class="row"><span>Accumulated rotation</span><b id="d-accrot">—</b></div>
+        <div class="row"><span>Accumulated translation</span><b id="d-acctrans">—</b></div>
+        <div class="row"><span>Net rotation</span><b id="d-netrot">—</b></div>
+        <div class="row"><span>Net translation</span><b id="d-nettrans">—</b></div>
+        <div class="hint">
+            Accumulated = sum of measured per-frame motion. Net = where
+            the internal pose is now. Nothing here is smoothed.
+        </div>
+    </section>
+
+    <section>
+        <h2>Stationary test</h2>
+        <div class="buttons">
+            <button id="btn-stat-start">Start</button>
+            <button id="btn-stat-stop">Stop</button>
+        </div>
+        <div class="hint">Keep the camera still. Motion is measured, never suppressed.</div>
+        <div id="stat-body" hidden>
+            <div class="row"><span>Window</span><b id="st-window">—</b></div>
+            <div class="row"><span>Rel translation mean ± std</span><b id="st-trans">—</b></div>
+            <div class="row"><span>Translation bias</span><b id="st-tbias">—</b></div>
+            <div class="row"><span>Rel rotation mean ± std</span><b id="st-rot">—</b></div>
+            <div class="row"><span>Rotation bias</span><b id="st-rbias">—</b></div>
+            <div class="row"><span>Optical flow</span><b id="st-flow">—</b></div>
+            <div class="row"><span>Median depth</span><b id="st-depth">—</b></div>
+            <div class="row"><span>Reprojection error</span><b id="st-reproj">—</b></div>
+            <div class="row"><span>Inlier ratio</span><b id="st-ratio">—</b></div>
+            <div class="row"><span>Stereo vertical offset</span><b id="st-vert">—</b></div>
+            <div class="row"><span>Position drift</span><b id="st-pdrift">—</b></div>
+            <div class="row"><span>Orientation drift</span><b id="st-odrift">—</b></div>
+            <div class="row"><span>Integrated measured motion</span><b id="st-measured">—</b></div>
+            <div class="hint" id="st-indication"></div>
+        </div>
+    </section>
+
+    <section>
+        <h2>Point cloud</h2>
+        <div class="row"><span>Live points</span><b id="pc-live">—</b></div>
+        <div class="row"><span>Map points / budget</span><b id="pc-map">—</b></div>
+        <div class="row"><span>Voxel size</span><b id="pc-voxel">—</b></div>
+        <div class="row"><span>Generated / accepted</span><b id="pc-gen">—</b></div>
+        <div class="row"><span>Filtered out</span><b id="pc-rej">—</b></div>
+        <div class="row"><span>&nbsp; miss / uncert / inlier / pose</span><b id="pc-rejsplit">—</b></div>
+        <div class="row"><span>Map new / merged / refined / evicted</span><b id="pc-ins">—</b></div>
+        <div class="row"><span>Track innovation (median)</span><b id="pc-innov">—</b></div>
+        <div class="row"><span>WebSocket live / map</span><b id="pc-rate">—</b></div>
+        <div class="row"><span>WebSocket bandwidth</span><b id="pc-kbps">—</b></div>
+        <div class="row"><span>Mesh triangles</span><b id="pc-mesh">—</b></div>
     </section>
 
     <section>
@@ -62,16 +182,6 @@
         </div>
     </section>
 
-    <section>
-        <h2>Tracking</h2>
-        <div class="row"><span>Tracked features</span><b id="t-features">—</b></div>
-        <div class="row"><span>PnP inliers</span><b id="t-inliers">—</b></div>
-        <div class="row"><span>Stereo matched</span><b id="t-matched">—</b></div>
-        <div class="row"><span>Triangulated</span><b id="t-tri">—</b></div>
-        <div class="row"><span>Tracking failures</span><b id="t-fail">—</b></div>
-        <div class="row"><span>Dropped frames</span><b id="t-drop">—</b></div>
-    </section>
-
     <section id="debug-section">
         <h2>Debug <span class="note" id="debug-note"></span></h2>
         <div id="debug-off" class="hint warn">
@@ -86,7 +196,7 @@
             <div class="row"><span>Min frame</span><b id="d-min">—</b></div>
             <div class="row"><span>Max frame</span><b id="d-max">—</b></div>
             <div class="row"><span>Avg features</span><b id="d-feat">—</b></div>
-            <div class="row"><span>IMU samples</span><b id="d-imu">—</b></div>
+            <div class="row"><span>Tracking failures</span><b id="t-fail">—</b></div>
             <div class="row"><span>Trajectory</span><b id="d-traj">—</b></div>
         </div>
     </section>
@@ -94,11 +204,15 @@
     <section>
         <h2>Graphs <span class="note">rolling 20 s</span></h2>
         <div class="graph"><label>VIO frame time (ms)</label>
-            <canvas id="g-frame" width="300" height="52"></canvas></div>
-        <div class="graph"><label>FPS</label>
-            <canvas id="g-fps" width="300" height="52"></canvas></div>
-        <div class="graph"><label>Tracked features</label>
-            <canvas id="g-feat" width="300" height="52"></canvas></div>
+            <canvas id="gr-frame" width="300" height="52"></canvas></div>
+        <div class="graph"><label>Relative rotation per frame (deg)</label>
+            <canvas id="gr-rot" width="300" height="52"></canvas></div>
+        <div class="graph"><label>Relative translation per frame (mm)</label>
+            <canvas id="gr-trans" width="300" height="52"></canvas></div>
+        <div class="graph"><label>Reprojection error median (px)</label>
+            <canvas id="gr-reproj" width="300" height="52"></canvas></div>
+        <div class="graph"><label>Inliers</label>
+            <canvas id="gr-inliers" width="300" height="52"></canvas></div>
     </section>
 
     <section>
@@ -108,23 +222,28 @@
             <b id="traj-count">0</b>
         </div>
         <label class="ctl">
-            Max points
+            Max trajectory points
             <input id="max-points" type="number" min="100" max="200000"
                    step="100" value="5000">
         </label>
-        <label class="ctl checkbox">
-            <input id="show-grid" type="checkbox" checked> Grid
+        <label class="ctl">
+            Mesh max edge (m)
+            <input id="mesh-edge" type="number" min="0.01" max="1"
+                   step="0.01" value="0.12">
         </label>
         <div class="hint">
             Novex is X right, Y <b>down</b>, Z forward (OpenCV camera
-            convention). The scene converts to Three.js Y-up as
-            (x, &minus;y, &minus;z).
+            convention, right-handed). Three.js is Y up; the scene
+            converts with the proper rotation diag(1, &minus;1, &minus;1).
+            The map is stored in the estimator's internal frame and
+            shown through the recenter origin, so Recenter moves it
+            without rewriting a single point.
         </div>
     </section>
 
 </aside>
 
-<div id="hud">drag to orbit &middot; scroll to zoom &middot; right-drag to pan</div>
+<div id="help">drag to orbit &middot; scroll to zoom &middot; right-drag to pan &middot; F to follow camera</div>
 
 <script type="module" src="app.js"></script>
 </body>

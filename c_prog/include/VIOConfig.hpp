@@ -105,7 +105,12 @@ struct VIOConfig
 
     bool stereoEnabled = true;
 
-    double stereoEpipolarThreshold = 0.008;  // normalised camera units
+    // How far the left and right rays may miss each other, as an
+    // ANGLE expressed in centre-of-image pixels. Angular so it means
+    // the same thing at the centre and at the edge of the fisheye; the
+    // old normalised-plane threshold was ~13x stricter in the corners
+    // than in the middle.
+    double stereoEpipolarThresholdPx = 2.5;
 
     // Forward-backward threshold for the left-right match. Looser than
     // the temporal one on purpose: the two images come from different
@@ -118,9 +123,67 @@ struct VIOConfig
     // ---- motion ----
 
     int    minInliersForTracking = 12;
-    double ransacReprojectionError = 0.004;  // normalised camera units
+
+    // RANSAC hypothesis threshold, normalised camera units. Only used
+    // to propose a pose; final inliers are chosen by angle below.
+    double ransacReprojectionError = 0.004;
     int    ransacIterations = 100;
     double ransacConfidence = 0.99;
+
+    // Final inlier threshold, as an angle in centre-of-image pixels.
+    double motionInlierThresholdPx = 1.5;
+
+    // Gauss-Newton iterations per refinement round.
+    int    motionRefineIterations = 8;
+
+    // Keyframe-relative estimation. Motion is estimated against the 3D
+    // points of a KEYFRAME rather than of the previous frame; a new
+    // keyframe is taken when the inliers still linking to it fall below
+    // this fraction of the inliers of its first estimate, or when it is
+    // keyframeMaxSpan frames old. 0 = frame-to-frame (every frame is a
+    // keyframe), which integrates every frame's error.
+    double keyframeRetention = 0.7;
+    int    keyframeMaxSpan = 300;
+
+    // ---- diagnostics ----
+
+    // --stationary-test: collect drift statistics from start-up, on
+    // the assumption the camera is not being moved. It only OBSERVES;
+    // it never suppresses or alters motion.
+    bool stationaryTestEnabled = false;
+
+    // ---- point cloud ----
+
+    // Live stereo points are published every frame they exist; this
+    // only controls whether the snapshot is built at all.
+    bool pointCloudEnabled = true;
+
+    // Accumulate points into a world-space map.
+    bool pointMapEnabled = true;
+
+    // Hard budget on map size. When full, the stalest, lowest-quality
+    // points are evicted.
+    int pointCloudMaxPoints = 20000;
+
+    // Voxel edge for deduplication, metres. 0 disables voxelisation
+    // and the map becomes a plain ring of the most recent points.
+    double pointCloudVoxelSize = 0.03;
+
+    // Quality gates for adding a point to the MAP. The live view shows
+    // every stereo point regardless - it is a diagnostic.
+    double pointCloudMaxDepth = 6.0;           // metres
+    double pointCloudMaxDepthSigma = 0.15;     // relative, at 1 px
+    // Defaults to the stereo matcher's own gate, i.e. no extra cut:
+    // on this rig the median ray miss is ~1.3 px (a calibration
+    // offset, see the geometry audit), and a tighter map gate would
+    // discard most of the scene.
+    double pointCloudMaxStereoResidualPx = 2.5;
+    int    pointCloudMinTrackAge = 1;          // frames
+    bool   pointCloudRequireInlier = true;     // motion inlier
+
+    // Rate at which point snapshots are handed to the IPC server.
+    // Independent of the VIO rate.
+    double pointCloudPublishHz = 15.0;
 
     // ---- IMU ----
 

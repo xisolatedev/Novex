@@ -10,10 +10,13 @@
 #include "Camera.hpp"
 #include "CommandQueue.hpp"
 #include "DebugStatistics.hpp"
+#include "Diagnostics.hpp"
 #include "FeatureTracker.hpp"
+#include "FisheyeGeometry.hpp"
 #include "Gui.hpp"
 #include "IMU.hpp"
 #include "Log.hpp"
+#include "PointCloud.hpp"
 #include "StateServer.hpp"
 #include "StereoCalibration.hpp"
 #include "StereoMatcher.hpp"
@@ -25,6 +28,8 @@
 
 #include <atomic>
 #include <cmath>
+#include <map>
+#include <random>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -723,6 +728,464 @@ int main(int argc, char** argv)
             fail("axis conversion is not a proper rotation, or the "
                  "quaternion form disagrees");
         }
+    }
+
+
+    // ================================================================
+    // P. Geometry fix, point map, point transport, drift diagnostics
+    // ================================================================
+
+    beginTest("P1. stereo points lie exactly on their left observation ray");
+
+    {
+        // The drift fix in one assertion. With intersecting rays the
+        // range must be exact. With rays that miss by 0.02 rad - far
+        // worse than the real calibration - the point must STILL lie
+        // exactly on the left ray, and the miss must be reported, not
+        // absorbed into a point that drifts off the observation.
+        const cv::Vec3d uL = cv::normalize(cv::Vec3d(0.31, -0.22, 1.0));
+        const cv::Vec3d centre(0.11, 0.0005, -0.002);
+
+        const cv::Vec3d exactTowards = uL * 2.0 - centre;
+
+        StereoMatcher::RayIntersection exact;
+
+        const bool exactOk = StereoMatcher::intersectOnLeftRay(
+            uL, cv::normalize(exactTowards), centre, exact);
+
+        cv::Vec3d towards = exactTowards;
+        towards += cv::Vec3d(0.0, 0.02 * cv::norm(towards), 0.0);
+
+        StereoMatcher::RayIntersection missed;
+
+        const bool missedOk = StereoMatcher::intersectOnLeftRay(
+            uL, cv::normalize(towards), centre, missed);
+
+        const double offRay = missedOk
+            ? cv::norm(cv::normalize(missed.point) - uL)
+            : 1.0;
+
+        if (exactOk && missedOk &&
+            std::abs(exact.range - 2.0) < 1e-9 && exact.missRadians < 1e-9 &&
+            offRay < 1e-12 &&
+            std::abs(missed.missRadians - 0.02) < 0.004)
+        {
+            char detail[200];
+
+            snprintf(detail, sizeof(detail),
+                     "exact range err %.1e m; with 0.02 rad miss: off-ray "
+                     "%.1e, miss reported %.4f rad",
+                     std::abs(exact.range - 2.0), offRay,
+                     missed.missRadians);
+
+            pass(detail);
+        }
+        else
+        {
+            fail("point left its ray, range was wrong, or the miss went "
+                 "unreported");
+        }
+    }
+
+    beginTest("P2. point map deduplicates by voxel");
+
+    {
+        PointMap map;
+        PointCloudCounters counters;
+
+        map.configure(1000, 0.05);
+
+        // 50 observations jittered inside one 5 cm voxel, and 10 in
+        // separate voxels.
+        std::mt19937 random(7);
+        std::uniform_real_distribution<float> jitter(0.001f, 0.049f);
+
+        for (int i = 0; i < 50; ++i)
+        {
+            map.insert(Eigen::Vector3f(1.0f + jitter(random),
+                                       0.5f + jitter(random),
+                                       2.0f + jitter(random)),
+                       200, 100, 1.0, counters);
+        }
+
+        for (int i = 0; i < 10; ++i)
+        {
+            map.insert(Eigen::Vector3f(0.025f + 0.2f * i, 0.025f, 0.025f),
+                       200, 100, 1.0, counters);
+        }
+
+        check(map.size() == 11 && counters.mapInserted == 11 &&
+                  counters.mapMerged == 49,
+              "expected 11 points (1 merged voxel + 10), got " +
+                  std::to_string(map.size()));
+    }
+
+    beginTest("P3. point budget evicts and the hash stays consistent");
+
+    {
+        PointMap map;
+        PointCloudCounters counters;
+
+        map.configure(100, 0.05);
+
+        // 5x the budget, all in distinct voxels.
+        for (int i = 0; i < 500; ++i)
+        {
+            map.insert(Eigen::Vector3f(0.025f + 0.1f * (i % 50),
+                                       0.025f + 0.1f * (i / 50),
+                                       1.0f),
+                       static_cast<uint8_t>(i % 255), 50,
+                       1.0 + i * 0.01, counters);
+        }
+
+        const bool bounded = map.size() == 100;
+
+        // Every surviving point must still be findable: re-inserting
+        // exactly at it must MERGE, never create a duplicate. That
+        // exercises backward-shift deletion after 400 evictions.
+        const uint64_t mergedBefore = counters.mapMerged;
+        size_t alive = 0;
+
+        for (size_t i = 0; i < map.capacity(); ++i)
+        {
+            const PointMap::Slot& slot = map.slot(i);
+
+            if (!slot.alive) continue;
+
+            ++alive;
+
+            map.insert(Eigen::Vector3f(slot.position[0], slot.position[1],
+                                       slot.position[2]),
+                       1, 1, 10.0, counters);
+        }
+
+        const bool consistent =
+            alive == 100 && counters.mapMerged - mergedBefore == 100 &&
+            map.size() == 100;
+
+        char detail[160];
+
+        snprintf(detail, sizeof(detail),
+                 "size %zu, %llu evicted, %zu re-found by hash",
+                 map.size(),
+                 static_cast<unsigned long long>(counters.mapEvicted),
+                 static_cast<size_t>(counters.mapMerged - mergedBefore));
+
+        if (bounded && consistent && counters.mapEvicted == 400)
+        {
+            pass(detail);
+        }
+        else
+        {
+            fail(detail);
+        }
+    }
+
+    beginTest("P4. a track's point moves instead of leaving a streak");
+
+    {
+        PointMap map;
+        PointCloudCounters counters;
+
+        map.configure(100, 0.03);
+
+        // One track whose fused estimate walks 30 cm along its ray over
+        // 20 frames: it must remain ONE point, at the latest estimate.
+        int32_t slot = -1;
+
+        for (int i = 0; i < 20; ++i)
+        {
+            slot = map.upsertTrack(slot, 42,
+                                   Eigen::Vector3f(0.1f, 0.2f, 1.0f + 0.015f * i),
+                                   180, 90, 1.0 + i / 30.0, counters);
+        }
+
+        const PointMap::Slot& s = map.slot(static_cast<size_t>(slot));
+
+        const bool single = map.size() == 1 &&
+                            std::abs(s.position[2] - (1.0f + 0.015f * 19)) < 1e-5f;
+
+        // A second track moving INTO the first one's voxel merges, and
+        // releases its own slot.
+        int32_t other = map.upsertTrack(-1, 43,
+                                        Eigen::Vector3f(0.5f, 0.2f, 1.0f),
+                                        180, 90, 2.0, counters);
+
+        other = map.upsertTrack(other, 43,
+                                Eigen::Vector3f(s.position[0] + 0.001f,
+                                                s.position[1], s.position[2]),
+                                180, 90, 2.1, counters);
+
+        check(single && other == slot && map.size() == 1,
+              "track point was duplicated or not merged");
+    }
+
+    beginTest("P5. binary map deltas reproduce the map exactly");
+
+    {
+        // A receiver that only ever applies appendMapDelta output must
+        // hold exactly the map's alive points, through inserts, merges,
+        // evictions, a skipped publish and a map clear.
+        PointMap map;
+        PointCloudChannel channel;
+        PointCloudCounters counters;
+
+        map.configure(400, 0.04);
+        channel.configure(16, 400);
+
+        std::map<uint32_t, std::array<float, 3>> receiver;
+        uint32_t epoch = 0;
+        uint32_t generation = 0;
+
+        std::mt19937 random(99);
+        std::uniform_real_distribution<float> coordinate(-2.0f, 2.0f);
+
+        auto receive = [&]()
+        {
+            std::vector<uint8_t> bytes;
+
+            if (channel.appendMapDelta(bytes, epoch, generation) == 0)
+            {
+                return;
+            }
+
+            uint16_t flags = 0;
+            uint32_t count = 0;
+
+            std::memcpy(&flags, bytes.data() + 6, 2);
+            std::memcpy(&count, bytes.data() + 8, 4);
+
+            if (flags & kPointFlagMapReset)
+            {
+                receiver.clear();
+            }
+
+            for (uint32_t k = 0; k < count; ++k)
+            {
+                const uint8_t* e =
+                    bytes.data() + kPointHeaderBytes + k * kMapEntryBytes;
+
+                uint32_t slot = 0;
+                std::array<float, 3> xyz {};
+
+                std::memcpy(&slot, e, 4);
+                std::memcpy(xyz.data(), e + 4, 12);
+
+                if (e[22])
+                {
+                    receiver[slot] = xyz;
+                }
+                else
+                {
+                    receiver.erase(slot);
+                }
+            }
+        };
+
+        PointPose pose;
+
+        for (int round = 0; round < 60; ++round)
+        {
+            for (int i = 0; i < 40; ++i)
+            {
+                map.insert(Eigen::Vector3f(coordinate(random),
+                                           coordinate(random),
+                                           coordinate(random)),
+                           100, 100, round, counters);
+            }
+
+            if (round == 30)
+            {
+                map.clear(round);
+            }
+
+            // Publish most rounds; the receiver skips some.
+            if (round % 7 != 3 &&
+                channel.tryPublishMap(map, round, round, pose, pose))
+            {
+                map.clearDirty();
+            }
+
+            if (round % 5 != 2)
+            {
+                receive();
+            }
+        }
+
+        channel.tryPublishMap(map, 99, 99, pose, pose);
+        map.clearDirty();
+        receive();
+
+        bool identical = receiver.size() == map.size();
+
+        for (const auto& entry : receiver)
+        {
+            const PointMap::Slot& slot = map.slot(entry.first);
+
+            identical = identical && slot.alive &&
+                        slot.position[0] == entry.second[0] &&
+                        slot.position[1] == entry.second[1] &&
+                        slot.position[2] == entry.second[2];
+        }
+
+        char detail[160];
+
+        snprintf(detail, sizeof(detail),
+                 "receiver %zu points, map %zu, %llu evictions",
+                 receiver.size(), map.size(),
+                 static_cast<unsigned long long>(counters.mapEvicted));
+
+        if (identical && counters.mapEvicted > 0)
+        {
+            pass(detail);
+        }
+        else
+        {
+            fail(detail);
+        }
+    }
+
+    beginTest("P6. stationary test attributes drift correctly");
+
+    {
+        std::mt19937 random(3);
+        std::normal_distribution<double> noise(0.0, 1.0);
+
+        auto run = [&](double biasRadians, bool corruptIntegration)
+        {
+            StationaryDiagnostic diagnostic;
+
+            Eigen::Matrix3d R = Eigen::Matrix3d::Identity();
+            Eigen::Vector3d p = Eigen::Vector3d::Zero();
+
+            diagnostic.start(0.0, R, p);
+
+            for (int i = 0; i < 300; ++i)
+            {
+                FrameDiagnostics f;
+
+                f.timestamp = i / 30.0;
+                f.frameId = static_cast<uint64_t>(i);
+                f.flowMedianPx = 0.15;
+                f.motionAttempted = true;
+                f.motionAccepted = true;
+                f.stereoValid = true;
+                f.stereoPoints = 80;
+
+                for (int k = 0; k < 3; ++k)
+                {
+                    f.relativeRotationVector[k] =
+                        noise(random) * 2e-4 + (k == 0 ? biasRadians : 0.0);
+                    f.relativeTranslation[k] = noise(random) * 3e-4;
+
+                    // Frame-to-frame operation: every frame is a
+                    // keyframe, so the raw estimate IS the per-frame
+                    // motion.
+                    f.estimateRotationVector[k] = f.relativeRotationVector[k];
+                    f.estimateTranslation[k] = f.relativeTranslation[k];
+                }
+
+                f.keyframeCreated = true;
+
+                const Eigen::Vector3d rv(f.relativeRotationVector[0],
+                                         f.relativeRotationVector[1],
+                                         f.relativeRotationVector[2]);
+
+                p += R * Eigen::Vector3d(f.relativeTranslation[0],
+                                         f.relativeTranslation[1],
+                                         f.relativeTranslation[2]);
+
+                if (rv.norm() > 0.0)
+                {
+                    R = R * Eigen::AngleAxisd(rv.norm(), rv.normalized())
+                                .toRotationMatrix();
+                }
+
+                // A broken integrator drifts on its own.
+                if (corruptIntegration)
+                {
+                    p += Eigen::Vector3d(0.001, 0.0, 0.0);
+                }
+
+                diagnostic.update(f, R, p);
+                diagnostic.noteKeyframe();
+            }
+
+            const StationaryReport r = diagnostic.report();
+
+            return std::string(r.indication ? r.indication : "");
+        };
+
+        const std::string clean = run(0.0, false);
+        const std::string biased = run(2e-4, false);
+        const std::string broken = run(0.0, true);
+
+        const bool ok = clean.rfind("no dominant bias", 0) == 0 &&
+                        biased.rfind("C ", 0) == 0 &&
+                        broken.rfind("D ", 0) == 0;
+
+        check(ok, "noise -> '" + clean.substr(0, 20) + "', bias -> '" +
+                      biased.substr(0, 20) + "', integration -> '" +
+                      broken.substr(0, 20) + "'");
+    }
+
+    beginTest("P7. an estimate spanning rejected frames composes on its reference");
+
+    {
+        StateEstimator estimator(config);
+
+        MotionResult step;
+
+        step.success = true;
+        step.inliers = 50;
+        step.rotation = cv::Matx33d::eye();
+        step.translation = cv::Vec3d(0.0, 0.0, -0.1);   // camera moves +z
+
+        estimator.applyMotion(step, 1.0, 0.033);
+
+        // Two frames lost. No IMU, so the pose is simply held.
+        std::vector<IMUSample> none;
+
+        estimator.applyTrackingLoss(none, 1.033);
+        estimator.applyTrackingLoss(none, 1.066);
+
+        // The next estimate spans all three intervals, measured against
+        // the reference: +0.3 m in total.
+        MotionResult span = step;
+        span.translation = cv::Vec3d(0.0, 0.0, -0.3);
+
+        estimator.applyMotion(span, 1.1, 0.1);
+
+        const double z = estimator.state().position.z();
+
+        char detail[120];
+        snprintf(detail, sizeof(detail), "z = %.6f m (expected 0.4)", z);
+
+        if (std::abs(z - 0.4) < 1e-9 && estimator.state().tracking)
+        {
+            pass(detail);
+        }
+        else
+        {
+            fail(detail);
+        }
+    }
+
+    beginTest("P8. point quality is monotonic in each measurement");
+
+    {
+        const uint8_t best = pointQuality(0.01f, 0.1f, true, 0.15, 2.5);
+        const uint8_t noisier = pointQuality(0.10f, 0.1f, true, 0.15, 2.5);
+        const uint8_t missier = pointQuality(0.01f, 2.0f, true, 0.15, 2.5);
+        const uint8_t outlier = pointQuality(0.01f, 0.1f, false, 0.15, 2.5);
+
+        // Exactly half of 255 at the uncertainty limit; 0.15f is not
+        // exactly 0.15, so either neighbour of 127.5 is correct.
+        const uint8_t atLimit = pointQuality(0.15f, 0.0f, true, 0.15, 2.5);
+
+        check(best > noisier && best > missier && best > outlier &&
+                  (atLimit == 127 || atLimit == 128),
+              "quality score ordering or scaling is wrong");
     }
 
     // ================================================================

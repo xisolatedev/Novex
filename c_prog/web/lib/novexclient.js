@@ -6,6 +6,11 @@
 // JSON object per line back. SUBSCRIBE puts the daemon into push mode
 // so this process does not poll.
 //
+// SUBSCRIBE_POINTS adds binary point cloud messages to the same
+// stream, each framed as a text line "BIN <n>" followed by exactly n
+// raw bytes. Parsing therefore works on Buffers, never on decoded
+// strings: a binary payload is not valid UTF-8.
+//
 // This client holds NO authoritative state. It caches the last message
 // purely so a browser that connects late gets something immediately
 // instead of waiting for the next push.
@@ -15,17 +20,25 @@ const { EventEmitter } = require('node:events');
 
 class NovexClient extends EventEmitter
 {
-    constructor({ socketPath, updateHz })
+    constructor({ socketPath, updateHz, pointsHz = 0 })
     {
         super();
 
         this.socketPath = socketPath;
         this.updateHz = updateHz;
 
+        // 0 = not subscribed. Changed at run time with setPointsHz, so
+        // the daemon only serialises points while someone is watching.
+        this.pointsHz = pointsHz;
+
         this.socket = null;
         this.connected = false;
         this.stopped = false;
-        this.pending = '';
+        this.pending = Buffer.alloc(0);
+
+        // Bytes still owed to the current BIN payload, or -1 when the
+        // next thing in the stream is a text line.
+        this.binaryRemaining = -1;
 
         this.latest = null;
         this.latestAt = 0;
@@ -105,9 +118,17 @@ class NovexClient extends EventEmitter
         {
             this.connected = true;
             this.reconnectDelay = 250;
-            this.pending = '';
+            this.pending = Buffer.alloc(0);
+            this.binaryRemaining = -1;
 
             socket.write(`SUBSCRIBE ${this.updateHz}\n`);
+
+            if (this.pointsHz > 0)
+            {
+                // Replies to subscription verbs are recognised by
+                // shape in _onLine, not queued as request replies.
+                socket.write(`SUBSCRIBE_POINTS ${this.pointsHz}\n`);
+            }
 
             this.emit('status', { connected: true });
         });
@@ -159,33 +180,99 @@ class NovexClient extends EventEmitter
         this.reconnectDelay = Math.min(this.reconnectDelay * 2, 4000);
     }
 
-    _onData(chunk)
+    // Starts, retunes or (with 0) stops the point stream.
+    setPointsHz(hz)
     {
-        this.pending += chunk.toString('utf8');
-
-        // Guard against a partial line growing without bound if the
-        // daemon ever stopped emitting newlines.
-        if (this.pending.length > 1 << 20)
+        if (hz === this.pointsHz)
         {
-            this.pending = '';
             return;
         }
 
-        let index;
+        this.pointsHz = hz;
 
-        while ((index = this.pending.indexOf('\n')) >= 0)
+        if (this.connected && this.socket)
         {
-            const line = this.pending.slice(0, index).trim();
+            this.socket.write(hz > 0
+                ? `SUBSCRIBE_POINTS ${hz}\n`
+                : 'UNSUBSCRIBE_POINTS\n');
+        }
+    }
 
-            this.pending = this.pending.slice(index + 1);
+    _onData(chunk)
+    {
+        this.pending = this.pending.length
+            ? Buffer.concat([this.pending, chunk])
+            : chunk;
 
-            if (line.length === 0)
+        // A full map resynchronisation is the largest legitimate
+        // message (500000 slots x 24 bytes); anything beyond a margin
+        // over that is a broken stream.
+        if (this.pending.length > 32 << 20)
+        {
+            this.pending = Buffer.alloc(0);
+            this.binaryRemaining = -1;
+            this.socket?.destroy();
+            return;
+        }
+
+        let offset = 0;
+
+        for (;;)
+        {
+            if (this.binaryRemaining >= 0)
             {
+                if (this.pending.length - offset < this.binaryRemaining)
+                {
+                    break;
+                }
+
+                const payload = this.pending.subarray(
+                    offset, offset + this.binaryRemaining
+                );
+
+                offset += this.binaryRemaining;
+                this.binaryRemaining = -1;
+
+                this.emit('points', payload);
                 continue;
             }
 
-            this._onLine(line);
+            const newline = this.pending.indexOf(0x0a, offset);
+
+            if (newline < 0)
+            {
+                break;
+            }
+
+            const line = this.pending.toString('utf8', offset, newline).trim();
+
+            offset = newline + 1;
+
+            if (line.startsWith('BIN '))
+            {
+                const length = Number(line.slice(4));
+
+                if (!Number.isInteger(length) || length < 0)
+                {
+                    this.socket?.destroy();
+                    return;
+                }
+
+                this.binaryRemaining = length;
+                continue;
+            }
+
+            if (line.length > 0)
+            {
+                this._onLine(line);
+            }
         }
+
+        // Keep only the unconsumed tail. Copied, so the large buffer
+        // it came from can be collected.
+        this.pending = offset >= this.pending.length
+            ? Buffer.alloc(0)
+            : Buffer.from(this.pending.subarray(offset));
     }
 
     _onLine(line)
@@ -216,6 +303,14 @@ class NovexClient extends EventEmitter
             this.latestAt = Date.now();
 
             this.emit('state', message);
+            return;
+        }
+
+        // Acknowledgements of the subscription verbs this client sends
+        // on its own; they must not be mistaken for request replies.
+        if ('pointsSubscribed' in message || 'subscribed' in message)
+        {
+            this.emit('subscription', message);
             return;
         }
 
