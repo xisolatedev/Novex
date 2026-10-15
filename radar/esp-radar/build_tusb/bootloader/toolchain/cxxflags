@@ -1,0 +1,6 @@
+"-specs=/media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/radar/esp-radar/build_tusb/bootloader/specs/picolibc.specs"
+-mlongcalls
+-fno-builtin-memcpy
+-fno-builtin-memset
+-fno-builtin-bzero
+-fno-rtti

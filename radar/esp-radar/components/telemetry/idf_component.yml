@@ -1,0 +1,6 @@
+dependencies:
+  # Only fetched/linked for the TinyUSB variant (sdkconfig.tusb.defaults)
+  espressif/esp_tinyusb:
+    version: "^2.3.0"
+    rules:
+      - if: "$CONFIG{RADAR_USB_TINYUSB} == True"

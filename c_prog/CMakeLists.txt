@@ -91,6 +91,7 @@ set(NOVEX_CORE_SOURCES
     src/MotionEstimator.cpp
     src/Diagnostics.cpp
     src/PointCloud.cpp
+    src/FloorEstimator.cpp
     src/IMU.cpp
     src/StateEstimator.cpp
     src/VIO.cpp
@@ -170,6 +171,12 @@ add_executable(novex-replay tools/novex_replay.cpp)
 target_link_libraries(novex-replay PRIVATE novex-core)
 target_compile_options(novex-replay PRIVATE ${NOVEX_FLAGS})
 
+# Floor / ground estimator: synthetic scenes with known ground truth,
+# plus a benchmark of the three cost paths.
+add_executable(novex-floor-test tools/floor_test.cpp)
+target_link_libraries(novex-floor-test PRIVATE novex-core)
+target_compile_options(novex-floor-test PRIVATE ${NOVEX_FLAGS})
+
 add_executable(novex-vio-test tests/test_novex.cpp)
 
 target_link_libraries(novex-vio-test PRIVATE novex-core novex-gui)
@@ -180,7 +187,9 @@ enable_testing()
 
 add_test(NAME novex-validation COMMAND novex-vio-test)
 
-set_tests_properties(novex-validation PROPERTIES
+add_test(NAME novex-floor COMMAND novex-floor-test)
+
+set_tests_properties(novex-validation novex-floor PROPERTIES
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
 # -----------------------------------------------------------------

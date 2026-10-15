@@ -1,0 +1,28 @@
+# esp-radar: ESP32-S3 CSI receiver node
+# Board: ESP32-S3, 16 MB flash, 8 MB Octal PSRAM (same as esp-training)
+CONFIG_IDF_TARGET="esp32s3"
+
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+
+# Octal PSRAM (kept so the TFLM tensor arena can be added back unchanged)
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_FREERTOS_HZ=1000
+
+# PC link: the board's CH343 USB-UART bridge on UART0 (/dev/ttyACM0).
+# ROM/bootloader print at 115200; the telemetry component then switches UART0
+# to 2 Mbaud and carries ESP_LOG + CSI lines on it.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# Channel State Information
+CONFIG_ESP_WIFI_CSI_ENABLED=y
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=64
+
+# Per-core CPU load in STAT (idle-task run-time counters, esp_timer clock)
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y

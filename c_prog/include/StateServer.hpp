@@ -151,6 +151,7 @@ private:
     size_t formatStatus(char* buffer, size_t size) const;
     size_t formatCamera(char* buffer, size_t size) const;
     size_t formatDiagnostics(char* buffer, size_t size) const;
+    size_t formatFloor(char* buffer, size_t size) const;
 
     // The message pushed to subscribers: state, performance and
     // debug in one object, so the dashboard parses once per update.

@@ -250,4 +250,5 @@ canvas {
 .good { color: var(--good); }
 .warn { color: var(--warn); }
 .bad  { color: var(--bad); }
+.muted { color: var(--dim); }
 .dim  { color: var(--dim); }

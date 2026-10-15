@@ -22,6 +22,8 @@ enum class Stage
     State,            // pose integration / estimator update
     Imu,              // IMU sample consumption
     PointCloud,       // 3D point snapshot + map insertion + publish
+    Floor,            // ground plane measurement (not the per-frame
+                      // prediction, which is too small to time)
     Total,            // whole frame, capture included
     Count
 };

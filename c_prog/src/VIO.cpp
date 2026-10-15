@@ -38,6 +38,7 @@ VIO::VIO(const VIOConfig& config,
       stereo(config, calibration),
       motion(config, calibration),
       estimator(config),
+      floor(config),
       collector(config.debugEnabled)
 {
     imuSamples.reserve(512);
@@ -96,6 +97,12 @@ void VIO::apply(const Command& command)
         {
             tracker.reset();
             estimator.reset();
+
+            // The floor is expressed in the internal world frame that
+            // reset has just redefined, so the tracked plane now
+            // refers to nothing. Dropping it is the only honest
+            // option; the next few frames re-acquire it.
+            floor.reset();
 
             havePrevious = false;
             previousTimestamp = 0.0;
@@ -275,6 +282,9 @@ bool VIO::initialise(const cv::Size& size)
 
     tracker.reset();
     estimator.reset();
+
+    floor.configure(static_cast<size_t>(config.maxFeatures) + 32);
+    floor.reset();
 
     havePrevious = false;
     previousTimestamp = 0.0;
@@ -512,6 +522,11 @@ bool VIO::process(const cv::Mat& left,
     {
         buildPointCloud(left, tracked, timestamp);
     }
+
+    // After stereo, so the features carry this frame's depth, and
+    // after the estimator, so the pose the points are lifted into the
+    // world with is this frame's pose rather than the last one's.
+    updateFloor(tracked, timestamp);
 
     previousLeft = left;
     previousTimestamp = timestamp;
@@ -789,6 +804,31 @@ void VIO::updateReferences(bool motionAccepted, bool newKeyframe,
     ++keyframes;
 
     frameDiagnostics.keyframeCreated = true;
+}
+
+void VIO::updateFloor(bool poseValid, double timestamp)
+{
+    if (!config.floorEnabled)
+    {
+        return;
+    }
+
+    FloorInput input;
+
+    input.features = &tracker.features();
+    input.worldFromCamera = estimator.internalRotation();
+    input.cameraInWorld = estimator.internalPosition();
+
+    // A floor is only measured from points placed with a pose that was
+    // actually measured this frame. Stereo also has to be on: with no
+    // depth there are no 3D points to fit anything to.
+    input.poseValid = poseValid && stereoRuntimeEnabled;
+
+    input.imu = &imuSamples;
+    input.timestamp = timestamp;
+    input.frameId = estimator.state().frameId + 1;
+
+    floor.update(input, timings);
 }
 
 void VIO::buildPointCloud(const cv::Mat& left, bool poseValid,
@@ -1128,6 +1168,8 @@ void VIO::publish()
     fresh.voxelSize = map.voxelSize();
     fresh.mapEpoch = map.epoch();
     fresh.pointCounters = pointTotals;
+
+    fresh.floor = floor.estimate();
 
     fresh.originOrientation =
         Eigen::Quaterniond(estimator.originRotationMatrix());

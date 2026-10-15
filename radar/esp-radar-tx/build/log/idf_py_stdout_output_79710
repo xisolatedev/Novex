@@ -1,0 +1,86 @@
+Command: ninja flash
+[1/5] cd /media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/radar/esp-radar-tx/build && /home/isodev/.espressif/tools/python/v6.1/venv/bin/python /home/isodev/.espressif/v6.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app /media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/radar/esp-radar-tx/build/partition_table/partition-table.bin /media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/radar/esp-radar-tx/build/esp-radar-tx.bin
+esp-radar-tx.bin binary size 0xd8450 bytes. Smallest app partition is 0x100000 bytes. 0x27bb0 bytes (16%) free.
+[2/5] Performing build step for 'bootloader'
+[1/1] cd /media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/radar/esp-radar-tx/build/bootloader && /home/isodev/.espressif/tools/python/v6.1/venv/bin/python /home/isodev/.espressif/v6.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x0 /media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/radar/esp-radar-tx/build/bootloader/bootloader.bin
+Bootloader binary size 0x5710 bytes. 0x28f0 bytes (32%) free.
+[3/5] No install step for 'bootloader'
+[4/5] Completed 'bootloader'
+[4/5] Running utility command for flash
+esptool --chip esp32c6 -p /dev/ttyACM0 -b 460800 --before=default-reset --after=hard-reset write-flash --flash-mode dio --flash-freq 80m --flash-size 2MB 0x0 bootloader/bootloader.bin 0x8000 partition_table/partition-table.bin 0x10000 esp-radar-tx.bin --skip-flashed
+esptool v5.4.0
+Serial port /dev/ttyACM0:
+Connecting...
+Connected to ESP32-C6 on /dev/ttyACM0:
+Chip type:          ESP32-C6 (QFN40) (revision v0.2)
+Features:           Wi-Fi 6, BT 5 (LE), IEEE802.15.4, Single Core + LP Core, 160MHz, Unknown Embedded Flash
+Crystal frequency:  40MHz
+USB mode:           USB-Serial/JTAG
+MAC:                ac:eb:e6:ff:fe:da:93:10
+BASE MAC:           ac:eb:e6:da:93:10
+MAC_EXT:            ff:fe
+
+Uploading stub flasher...
+Running stub flasher...
+Stub flasher running.
+Changing baud rate to 460800...
+Changed.
+
+Configuring flash size...
+
+Writing 'bootloader/bootloader.bin' at 0x00000000...
+SHA digest in image updated.
+Comparing flash contents against new data...
+Flash will be erased from 0x00000000 to 0x00005fff...
+Compressed 22288 bytes to 14007...
+Writing at 0x00005710 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100.0% 13.68kB/13.68kB [0s] 
+Wrote 22288 bytes (14007 compressed) at 0x00000000 in 0.3 seconds (533.6 kbit/s).
+Verifying written data...
+Hash of data verified.
+
+Writing 'partition_table/partition-table.bin' at 0x00008000...
+Comparing flash contents against new data...
+'partition_table/partition-table.bin' at 0x00008000 already in flash, skipping write.
+
+Writing 'esp-radar-tx.bin' at 0x00010000...
+Comparing flash contents against new data...
+Flash will be erased from 0x00010000 to 0x000e8fff...
+Compressed 885840 bytes to 531826...
+Writing at 0x0001bc29 ╸                                3.1% 16.00kB/519.36kB [0s] 
+Writing at 0x00023980 ━╸                               6.2% 32.00kB/519.36kB [0s] 
+Writing at 0x0002d1c0 ━━╸                              9.2% 48.00kB/519.36kB [0s] 
+Writing at 0x00033f4a ━━━╸                            12.3% 64.00kB/519.36kB [1s] 
+Writing at 0x0003b998 ━━━━╸                           15.4% 80.00kB/519.36kB [1s] 
+Writing at 0x00042cb6 ━━━━━╸                          18.5% 96.00kB/519.36kB [1s] 
+Writing at 0x00048e5b ━━━━━━                          21.6% 112.00kB/519.36kB [2s] 
+Writing at 0x0004ecb4 ━━━━━━━                         24.6% 128.00kB/519.36kB [2s] 
+Writing at 0x00054a3e ━━━━━━━━                        27.7% 144.00kB/519.36kB [2s] 
+Writing at 0x0005a80d ━━━━━━━━━                       30.8% 160.00kB/519.36kB [2s] 
+Writing at 0x000603f9 ━━━━━━━━━━                      33.9% 176.00kB/519.36kB [2s] 
+Writing at 0x00066ba4 ━━━━━━━━━━━                     37.0% 192.00kB/519.36kB [2s] 
+Writing at 0x0006c9f9 ━━━━━━━━━━━━                    40.0% 208.00kB/519.36kB [2s] 
+Writing at 0x00072611 ━━━━━━━━━━━━╸                   43.1% 224.00kB/519.36kB [2s] 
+Writing at 0x00078517 ━━━━━━━━━━━━━╸                  46.2% 240.00kB/519.36kB [2s] 
+Writing at 0x0007e6b8 ━━━━━━━━━━━━━━╸                 49.3% 256.00kB/519.36kB [3s] 
+Writing at 0x00084c67 ━━━━━━━━━━━━━━━╸                52.4% 272.00kB/519.36kB [3s] 
+Writing at 0x0008aaf5 ━━━━━━━━━━━━━━━━╸               55.5% 288.00kB/519.36kB [3s] 
+Writing at 0x0009091d ━━━━━━━━━━━━━━━━━╸              58.5% 304.00kB/519.36kB [3s] 
+Writing at 0x00096a26 ━━━━━━━━━━━━━━━━━━              61.6% 320.00kB/519.36kB [3s] 
+Writing at 0x0009ceef ━━━━━━━━━━━━━━━━━━━             64.7% 336.00kB/519.36kB [3s] 
+Writing at 0x000a403a ━━━━━━━━━━━━━━━━━━━━            67.8% 352.00kB/519.36kB [3s] 
+Writing at 0x000aad8b ━━━━━━━━━━━━━━━━━━━━━           70.9% 368.00kB/519.36kB [3s] 
+Writing at 0x000b1ca9 ━━━━━━━━━━━━━━━━━━━━━━          73.9% 384.00kB/519.36kB [4s] 
+Writing at 0x000b8102 ━━━━━━━━━━━━━━━━━━━━━━━         77.0% 400.00kB/519.36kB [4s] 
+Writing at 0x000be3bd ━━━━━━━━━━━━━━━━━━━━━━━━        80.1% 416.00kB/519.36kB [4s] 
+Writing at 0x000c4664 ━━━━━━━━━━━━━━━━━━━━━━━━╸       83.2% 432.00kB/519.36kB [4s] 
+Writing at 0x000ca47c ━━━━━━━━━━━━━━━━━━━━━━━━━╸      86.3% 448.00kB/519.36kB [4s] 
+Writing at 0x000d11e2 ━━━━━━━━━━━━━━━━━━━━━━━━━━╸     89.3% 464.00kB/519.36kB [4s] 
+Writing at 0x000d7b3d ━━━━━━━━━━━━━━━━━━━━━━━━━━━╸    92.4% 480.00kB/519.36kB [4s] 
+Writing at 0x000dd52f ━━━━━━━━━━━━━━━━━━━━━━━━━━━━╸   95.5% 496.00kB/519.36kB [4s] 
+Writing at 0x000e3392 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╸  98.6% 512.00kB/519.36kB [4s] 
+Writing at 0x000e8450 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100.0% 519.36kB/519.36kB [5s] 
+Wrote 885840 bytes (531826 compressed) at 0x00010000 in 5.2 seconds (1361.5 kbit/s).
+Verifying written data...
+Hash of data verified.
+
+Hard resetting via RTS pin...

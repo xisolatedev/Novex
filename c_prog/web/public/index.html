@@ -50,6 +50,7 @@
     <label><input id="l-traj" type="checkbox" checked> Trajectory</label>
     <label><input id="l-camera" type="checkbox" checked> Camera</label>
     <label><input id="l-mesh" type="checkbox"> Mesh <em>(experimental)</em></label>
+    <label><input id="l-floor" type="checkbox" checked> Floor plane</label>
     <div class="sep"></div>
     <label><input id="l-ids" type="checkbox"> Feature ID colours</label>
     <label><input id="l-depth" type="checkbox" checked> Depth colouring</label>
@@ -149,6 +150,27 @@
             <div class="row"><span>Orientation drift</span><b id="st-odrift">—</b></div>
             <div class="row"><span>Integrated measured motion</span><b id="st-measured">—</b></div>
             <div class="hint" id="st-indication"></div>
+        </div>
+    </section>
+
+    <section>
+        <h2>Floor <span class="note">ground plane</span></h2>
+        <div class="row"><span>Status</span><b id="f-status">—</b></div>
+        <div class="row"><span>Confidence</span><b id="f-conf">—</b></div>
+        <div class="row"><span>Camera height</span><b id="f-height">—</b></div>
+        <div class="row"><span>Distance to plane</span><b id="f-distance">—</b></div>
+        <div class="row"><span>Normal <em>(reported)</em></span><b id="f-normal">—</b></div>
+        <div class="row"><span>Tilt</span><b id="f-tilt">—</b></div>
+        <div class="row"><span>Gravity disagreement</span><b id="f-gravity">—</b></div>
+        <div class="row"><span>Inliers / candidates</span><b id="f-support">—</b></div>
+        <div class="row"><span>Fit quality</span><b id="f-quality">—</b></div>
+        <div class="row"><span>Since last measurement</span><b id="f-age">—</b></div>
+        <div class="hint" id="f-detail"></div>
+        <div class="hint">
+            Height is measured along the floor normal, not down a world
+            axis, so camera tilt does not change it. The plane is held
+            in world space: rotating the camera moves the view, never
+            the floor. GROUND UNKNOWN is reported rather than a guess.
         </div>
     </section>
 

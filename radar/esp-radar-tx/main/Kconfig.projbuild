@@ -1,0 +1,14 @@
+menu "esp-radar-tx"
+    config TX_CHANNEL
+        int "2.4 GHz channel to transmit on"
+        range 1 13
+        default 11
+    config TX_RATE_HZ
+        int "Packets per second"
+        range 1 2000
+        default 100
+    config TX_PAYLOAD_LEN
+        int "ESP-NOW payload bytes (fixed packet size)"
+        range 24 250
+        default 64
+endmenu

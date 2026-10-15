@@ -19,6 +19,7 @@ const char* stageName(Stage stage)
         case Stage::State:      return "state";
         case Stage::Imu:        return "imu";
         case Stage::PointCloud: return "pointcloud";
+        case Stage::Floor:      return "floor";
         case Stage::Total:      return "total";
         default:                return "?";
     }

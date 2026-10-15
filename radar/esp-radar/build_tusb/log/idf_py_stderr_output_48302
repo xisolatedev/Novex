@@ -1,0 +1,3 @@
+Command: ninja flash
+WARNING: XMC flash chip boot-up failure detected! Running XMC25QHxxC startup flow.
+WARNING: XMC flash boot-up fix failed.

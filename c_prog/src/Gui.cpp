@@ -162,6 +162,18 @@ bool Gui::draw(const Camera& camera, const VIO& vio)
         }
     }
 
+    // Floor debug on the left pane only: the estimate is expressed in
+    // the LEFT camera frame, and projecting it into the right eye
+    // would be drawing it in the wrong place.
+    if (config.floorEnabled)
+    {
+        const StereoCalibration& calibration = vio.stereoCalibration();
+
+        vio.floorEstimator().drawDebug(leftPane,
+                                       calibration.leftK(),
+                                       calibration.leftDistortion());
+    }
+
     drawOverlay(canvas, camera, vio.snapshot());
 
     cv::imshow(kWindowName, canvas);
@@ -276,6 +288,35 @@ void Gui::drawOverlay(cv::Mat& target,
              stage[static_cast<int>(Stage::Total)]);
 
     putLabel(target, line, 8, y, kWhite);
+    y += step;
+
+    // ---- floor ----
+    const FloorEstimate& floor = snapshot.floor;
+
+    if (floor.status == FloorStatus::Unknown)
+    {
+        snprintf(line, sizeof(line), "FLOOR  GROUND UNKNOWN : %s",
+                 floor.detail);
+
+        putLabel(target, line, 8, y, kAmber);
+    }
+    else
+    {
+        snprintf(line, sizeof(line),
+                 "FLOOR %s (%s)  h %.3f m  conf %.2f  tilt %.1f deg  "
+                 "in %d/%d  age %.1f s",
+                 floorStatusName(floor.status),
+                 floorDownSourceName(floor.downSource),
+                 floor.cameraHeight,
+                 floor.confidence,
+                 floor.tiltDegrees,
+                 floor.inlierCount,
+                 floor.candidateCount,
+                 floor.ageSeconds);
+
+        putLabel(target, line, 8, y,
+                 floor.status == FloorStatus::Tracking ? kGreen : kAmber);
+    }
 
     putLabel(target, "esc or q to quit", 8, target.rows - 10, kWhite);
 }

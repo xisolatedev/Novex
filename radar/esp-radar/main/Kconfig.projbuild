@@ -1,0 +1,50 @@
+menu "esp-radar"
+
+    config RADAR_CSI_CHANNEL
+        int "Wi-Fi channel to capture CSI on (0 = strongest AP from boot scan)"
+        range 0 13
+        default 0
+        help
+            Primary 2.4 GHz channel the radio parks on. 0 picks the channel of
+            the strongest access point found by the boot scan. Can be changed
+            at runtime with the "ch <n>" command.
+
+    config RADAR_PROMISC_DATA
+        bool "Capture CSI from DATA frames (not only management frames)"
+        default y
+        help
+            Management-only capture mostly sees beacons, which are often DSSS
+            (no CSI). Including DATA frames gives far more OFDM packets, but a
+            much higher interrupt load. Runtime command: "filter mgmt|all".
+
+    config RADAR_RING_INT_KB
+        int "Internal-RAM ring buffer (KiB) between producers and transport"
+        range 8 160
+        default 64
+
+    config RADAR_RING_PSRAM_KB
+        int "PSRAM ring buffer (KiB), selectable at runtime with 'ring psram'"
+        range 0 4096
+        default 1024
+
+    config RADAR_TRANSPORT_CORE
+        int "Core the transport task is pinned to (Wi-Fi/CSI runs on core 0)"
+        range 0 1
+        default 1
+
+    config RADAR_TRANSPORT_PRIO
+        int "Transport task priority (core 1)"
+        default 10
+
+    config RADAR_USB_TX_BUF_KB
+        int "USB-Serial/JTAG driver TX buffer (KiB)"
+        default 16
+
+    config RADAR_USB_TINYUSB
+        bool "Use TinyUSB CDC-ACM on the native USB port instead of USB-Serial/JTAG"
+        default n
+        help
+            The S3 has one USB PHY. With TinyUSB the USB-Serial/JTAG device
+            disappears, so flashing needs the "bootloader" command (or BOOT+RST).
+
+endmenu

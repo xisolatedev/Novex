@@ -1,0 +1,84 @@
+{
+  "projectVersion": 2,
+  "files": [
+    "RC++UFO_1.9.6_APKPure.xapk"
+  ],
+  "treeExpansionsV2": [
+    "t:JResources//com.cooingdv.rcufo.apk",
+    "p:com",
+    "t:JInputs//JInputFiles",
+    "t:JResources//config.arm64_v8a.apk"
+  ],
+  "codeData": {
+    "comments": [],
+    "renames": []
+  },
+  "openTabs": [
+    {
+      "type": "class",
+      "tabPath": "com.cooingdv.rcufo.BuildConfig",
+      "subPath": "0",
+      "caret": 276,
+      "view": {
+        "x": 0,
+        "y": 0
+      },
+      "active": false,
+      "pinned": false,
+      "bookmarked": false,
+      "hidden": false,
+      "previewTab": false
+    },
+    {
+      "type": "class",
+      "tabPath": "com.cooingdv.rcufo.utils.WifiIdUtils",
+      "subPath": "0",
+      "caret": 225,
+      "view": {
+        "x": 0,
+        "y": 0
+      },
+      "active": false,
+      "pinned": false,
+      "bookmarked": false,
+      "hidden": false,
+      "previewTab": false
+    },
+    {
+      "type": "class",
+      "tabPath": "com.cooingdv.rcufo.utils.RecognitionUtils",
+      "subPath": "0",
+      "caret": 330,
+      "view": {
+        "x": 0,
+        "y": 0
+      },
+      "active": false,
+      "pinned": false,
+      "bookmarked": false,
+      "hidden": false,
+      "previewTab": false
+    },
+    {
+      "type": "class",
+      "tabPath": "com.cooingdv.rcufo.utils.ConnectWifiUtils",
+      "subPath": "0",
+      "caret": 1076,
+      "view": {
+        "x": 0,
+        "y": 1059
+      },
+      "active": true,
+      "pinned": false,
+      "bookmarked": false,
+      "hidden": false,
+      "previewTab": false
+    }
+  ],
+  "cacheDir": "/home/isodev/.var/app/com.github.skylot.jadx/cache/jadx/projects/RC++UFO_1.9.6_APKPure-72a5b5948fdf9256a8965c2a3ed247ca",
+  "enableLiveReload": false,
+  "searchHistory": [],
+  "searchResourcesFilter": "$TEXT",
+  "searchResourcesSizeLimit": 0,
+  "pluginOptions": {}
+}

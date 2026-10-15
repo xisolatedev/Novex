@@ -1,0 +1,7 @@
+source "/home/isodev/.espressif/v6.1/esp-idf/components/app_update/Kconfig.projbuild"
+source "/home/isodev/.espressif/v6.1/esp-idf/components/bootloader/Kconfig.projbuild"
+source "/home/isodev/.espressif/v6.1/esp-idf/components/esp_app_format/Kconfig.projbuild"
+source "/home/isodev/.espressif/v6.1/esp-idf/components/esp_rom/Kconfig.projbuild"
+source "/home/isodev/.espressif/v6.1/esp-idf/components/esptool_py/Kconfig.projbuild"
+source "/home/isodev/.espressif/v6.1/esp-idf/components/partition_table/Kconfig.projbuild"
+source "/media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/radar/esp-radar/main/Kconfig.projbuild"

@@ -180,6 +180,125 @@ bool VIOConfig::loadFile(const std::string& path)
     pointCloudPublishHz =
         yaml.getDouble("pointcloud.publish_hz", pointCloudPublishHz);
 
+    floorEnabled = yaml.getBool("floor.enabled", floorEnabled);
+
+    floorUpdateHz = yaml.getDouble("floor.update_hz", floorUpdateHz);
+    floorMaxPoints = yaml.getInt("floor.max_points", floorMaxPoints);
+
+    floorMinDepth = yaml.getDouble("floor.min_depth_m", floorMinDepth);
+    floorMaxDepth = yaml.getDouble("floor.max_depth_m", floorMaxDepth);
+
+    floorMaxDepthSigma =
+        yaml.getDouble("floor.max_depth_sigma", floorMaxDepthSigma);
+
+    floorMaxStereoResidualPx =
+        yaml.getDouble("floor.max_stereo_residual_px",
+                       floorMaxStereoResidualPx);
+
+    floorMinTrackAge = yaml.getInt("floor.min_track_age", floorMinTrackAge);
+
+    floorRequireMotionInlier =
+        yaml.getBool("floor.require_motion_inlier",
+                     floorRequireMotionInlier);
+
+    floorHeightBinM = yaml.getDouble("floor.height_bin_m", floorHeightBinM);
+
+    floorClusterPeakFraction =
+        yaml.getDouble("floor.cluster_peak_fraction",
+                       floorClusterPeakFraction);
+
+    floorClusterBandM =
+        yaml.getDouble("floor.cluster_band_m", floorClusterBandM);
+
+    floorInlierBandM = yaml.getDouble("floor.inlier_band_m", floorInlierBandM);
+    floorPriorBandM = yaml.getDouble("floor.prior_band_m", floorPriorBandM);
+
+    floorRansacIterations =
+        yaml.getInt("floor.ransac_iterations", floorRansacIterations);
+
+    floorMinInliers = yaml.getInt("floor.min_inliers", floorMinInliers);
+
+    floorMinInlierFraction =
+        yaml.getDouble("floor.min_inlier_fraction", floorMinInlierFraction);
+
+    floorMaxResidualM =
+        yaml.getDouble("floor.max_residual_m", floorMaxResidualM);
+
+    floorMinSpanM = yaml.getDouble("floor.min_span_m", floorMinSpanM);
+    floorMinHeightM = yaml.getDouble("floor.min_height_m", floorMinHeightM);
+    floorMaxHeightM = yaml.getDouble("floor.max_height_m", floorMaxHeightM);
+
+    floorMinAboveFraction =
+        yaml.getDouble("floor.min_above_fraction", floorMinAboveFraction);
+
+    floorMaxTiltDeg = yaml.getDouble("floor.max_tilt_deg", floorMaxTiltDeg);
+
+    floorIrlsIterations =
+        yaml.getInt("floor.irls_iterations", floorIrlsIterations);
+
+    floorHuberM = yaml.getDouble("floor.huber_m", floorHuberM);
+
+    floorBlendAlpha = yaml.getDouble("floor.blend_alpha", floorBlendAlpha);
+
+    floorDecayTauSeconds =
+        yaml.getDouble("floor.decay_tau_s", floorDecayTauSeconds);
+
+    floorMinInitObservations =
+        yaml.getInt("floor.min_init_observations", floorMinInitObservations);
+
+    floorTrackingConfidence =
+        yaml.getDouble("floor.tracking_confidence", floorTrackingConfidence);
+
+    floorLostConfidence =
+        yaml.getDouble("floor.lost_confidence", floorLostConfidence);
+
+    floorUnknownConfidence =
+        yaml.getDouble("floor.unknown_confidence", floorUnknownConfidence);
+
+    floorMaxJumpDeg = yaml.getDouble("floor.max_jump_deg", floorMaxJumpDeg);
+    floorMaxJumpM = yaml.getDouble("floor.max_jump_m", floorMaxJumpM);
+
+    floorReacquireAfter =
+        yaml.getInt("floor.reacquire_after", floorReacquireAfter);
+
+    floorUseGravity = yaml.getBool("floor.use_gravity", floorUseGravity);
+    floorAccelSign = yaml.getDouble("floor.accel_sign", floorAccelSign);
+
+    floorGravityToleranceRatio =
+        yaml.getDouble("floor.gravity_tolerance_ratio",
+                       floorGravityToleranceRatio);
+
+    floorStaticGyroThreshold =
+        yaml.getDouble("floor.static_gyro_threshold",
+                       floorStaticGyroThreshold);
+
+    floorGravityAlpha =
+        yaml.getDouble("floor.gravity_alpha", floorGravityAlpha);
+
+    floorAssumeUprightStart =
+        yaml.getBool("floor.assume_upright_start", floorAssumeUprightStart);
+
+    const std::vector<double> nominalDown =
+        yaml.getVector("floor.nominal_down_world");
+
+    if (!nominalDown.empty())
+    {
+        if (nominalDown.size() != 3)
+        {
+            LOG_ERROR(
+                "config: floor.nominal_down_world needs 3 values, got %zu",
+                nominalDown.size()
+            );
+
+            return false;
+        }
+
+        for (size_t i = 0; i < 3; ++i)
+        {
+            floorNominalDownWorld[i] = nominalDown[i];
+        }
+    }
+
     imuBackend    = yaml.getString("imu.backend", imuBackend);
     imuDevicePath = yaml.getString("imu.device_path", imuDevicePath);
     imuRateHz     = yaml.getInt("imu.rate_hz", imuRateHz);
@@ -643,6 +762,71 @@ bool VIOConfig::validate() const
                 "publish_hz 0..60"
             );
 
+            return false;
+        }
+    }
+
+    if (floorEnabled)
+    {
+        if (!(floorUpdateHz > 0.0) || floorUpdateHz > 60.0)
+        {
+            LOG_ERROR("config: floor.update_hz must be 0..60");
+            return false;
+        }
+
+        if (floorMinDepth <= 0.0 || floorMaxDepth <= floorMinDepth)
+        {
+            LOG_ERROR("config: floor depth range is inverted or invalid");
+            return false;
+        }
+
+        if (floorMinHeightM < 0.0 || floorMaxHeightM <= floorMinHeightM)
+        {
+            LOG_ERROR("config: floor height window is inverted or invalid");
+            return false;
+        }
+
+        if (floorMinInliers < 3 || floorMaxPoints < 16)
+        {
+            LOG_ERROR(
+                "config: floor.min_inliers must be >= 3 and "
+                "floor.max_points >= 16"
+            );
+
+            return false;
+        }
+
+        if (!(floorInlierBandM > 0.0) || !(floorClusterBandM > 0.0) ||
+            !(floorPriorBandM > 0.0) || !(floorHeightBinM > 0.0))
+        {
+            LOG_ERROR("config: floor band and bin widths must be > 0");
+            return false;
+        }
+
+        if (floorMaxTiltDeg <= 0.0 || floorMaxTiltDeg >= 90.0)
+        {
+            LOG_ERROR("config: floor.max_tilt_deg must be in (0, 90)");
+            return false;
+        }
+
+        // Ordered thresholds. Out of order, the status machine would
+        // be able to sit in a state it can never leave.
+        if (!(floorUnknownConfidence < floorLostConfidence &&
+              floorLostConfidence < floorTrackingConfidence &&
+              floorTrackingConfidence <= 1.0 &&
+              floorUnknownConfidence >= 0.0))
+        {
+            LOG_ERROR(
+                "config: floor confidences must satisfy 0 <= unknown < "
+                "lost < tracking <= 1"
+            );
+
+            return false;
+        }
+
+        if (floorAccelSign != 1.0 && floorAccelSign != -1.0)
+        {
+            LOG_ERROR("config: floor.accel_sign must be +1 or -1");
             return false;
         }
     }

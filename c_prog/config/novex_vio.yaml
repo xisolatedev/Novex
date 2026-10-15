@@ -183,6 +183,120 @@ pointcloud:
 
 
 # ------------------------------------------------------------
+# Floor / ground plane estimation
+# ------------------------------------------------------------
+# Geometric, not learned. The same stereo points the point cloud is
+# built from are used to find the dominant ground plane, which is then
+# tracked in the estimator's internal world frame so that rotating the
+# camera does not move the floor.
+#
+# Conventions, spelled out in include/FloorEstimator.hpp:
+#   plane      n . X + d = 0, |n| = 1, n points UP (floor -> camera)
+#   height     n . C + d, the SIGNED height of the camera above the
+#              floor. Never a world Y coordinate.
+floor:
+  enabled: true
+
+  # Full measurement rate. Prediction runs every frame regardless and
+  # costs almost nothing - that is what keeps the floor stable under
+  # rotation between measurements.
+  update_hz: 6.0
+
+  # Hard cap on points per measurement; the rest are decimated
+  # deterministically. This is the main cost knob on the Pi.
+  max_points: 300
+
+  # --- which stereo points may vote ---
+  min_depth_m: 0.25
+  max_depth_m: 6.0
+  max_depth_sigma: 0.15
+  max_stereo_residual_px: 2.5
+  min_track_age: 1
+  require_motion_inlier: false
+
+  # --- acquisition ---
+  # With an up direction known, only the plane's OFFSET is unknown, so
+  # acquisition is a 1D search over height instead of a 3-point RANSAC.
+  height_bin_m: 0.05
+
+  # A height cluster counts as real at this fraction of the biggest
+  # one in view. The LOWEST real cluster is the floor - this is what
+  # stops a table or a desk from winning on point count alone.
+  cluster_peak_fraction: 0.25
+  cluster_band_m: 0.08
+
+  inlier_band_m: 0.05
+  prior_band_m: 0.12
+
+  # Only used when there is no gravity, no tracked plane and no
+  # upright assumption at all.
+  ransac_iterations: 80
+
+  # --- acceptance gates ---
+  min_inliers: 25
+  min_inlier_fraction: 0.12
+  max_residual_m: 0.05
+
+  # Smaller in-plane extent of the support. Rejects the wall/floor
+  # seam and any other near-collinear set of points.
+  min_span_m: 0.30
+
+  min_height_m: 0.05
+  max_height_m: 4.0
+
+  # Fraction of points that must lie on or above the plane. A ceiling
+  # fails this outright, with or without gravity.
+  min_above_fraction: 0.75
+
+  max_tilt_deg: 25.0
+
+  # --- robust fit ---
+  irls_iterations: 4
+  huber_m: 0.03
+
+  # --- temporal tracking ---
+  blend_alpha: 0.5
+  decay_tau_s: 2.0
+  min_init_observations: 3
+
+  # Ordered: 0 <= unknown < lost < tracking <= 1.
+  tracking_confidence: 0.40
+  lost_confidence: 0.15
+  unknown_confidence: 0.05
+
+  # A measurement further than this from the tracked plane is treated
+  # as an outlier, until this many in a row - then the tracked plane is
+  # abandoned and re-acquired.
+  max_jump_deg: 12.0
+  max_jump_m: 0.25
+  reacquire_after: 5
+
+  # --- gravity ---
+  # Used as a CONSTRAINT on the normal, never as the answer. Only
+  # samples at ~1 g with a quiet gyro are used, and the camera-IMU
+  # extrinsic in imu.R_camera_from_body is still a placeholder on this
+  # rig - so with the IMU on, verify floor.gravity_deg in the IPC
+  # output before trusting it.
+  use_gravity: true
+
+  # up = accel_sign * normalise(acceleration). +1 for an IMU reporting
+  # specific force (the usual case), -1 for one that already negates.
+  accel_sign: 1.0
+
+  gravity_tolerance_ratio: 0.12
+  static_gyro_threshold: 0.35
+  gravity_alpha: 0.05
+
+  # With no IMU: assume the device was roughly upright at start-up, so
+  # world down is the camera's +Y at that moment. Reported as
+  # down_source=nominal and penalised in the confidence - it is an
+  # assumption, not a measurement. Set false to force the fully
+  # unconstrained fit instead.
+  assume_upright_start: true
+  nominal_down_world: [0.0, 1.0, 0.0]
+
+
+# ------------------------------------------------------------
 # Drift diagnostics
 # ------------------------------------------------------------
 diagnostics:

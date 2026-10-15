@@ -60,15 +60,28 @@ public:
         {
             used += static_cast<size_t>(written);
         }
+
+        // vsnprintf reports what it WOULD have written, so this
+        // catches the overflow even though nothing was scribbled past
+        // the end.
+        if (used >= size)
+        {
+            overflow = true;
+        }
     }
 
     size_t length() const { return std::min(used, size); }
+
+    // True when the object was cut short. A truncated JSON object is
+    // not valid JSON, so a caller must report it rather than send it.
+    bool truncated() const { return overflow; }
 
 private:
 
     char* buffer;
     size_t size;
     size_t used = 0;
+    bool overflow = false;
 };
 
 // Static strings only (failure reasons, indications); they contain no
@@ -87,7 +100,8 @@ void addString(JsonWriter& json, const char* key, const char* value)
 
 // The geometry / drift / stationary / point cloud objects, shared by
 // the push stream and GET_DIAGNOSTICS so the two can never disagree.
-void addDiagnostics(JsonWriter& json, const VIOSnapshot& s,
+void addDiagnostics(JsonWriter& json, const VIOConfig& config,
+                    const VIOSnapshot& s,
                     const PointCloudChannel::Summary& points,
                     uint64_t pointBytes, uint64_t pointMessages)
 {
@@ -241,6 +255,60 @@ void addDiagnostics(JsonWriter& json, const VIOSnapshot& s,
              s.originOrientation.z(), s.originOrientation.w(),
              s.originPosition.x(), s.originPosition.y(),
              s.originPosition.z());
+
+    // ---- floor ----
+    //
+    // The plane is given in the REPORTED frame, like every other
+    // position the dashboard receives, so the browser can draw it
+    // without knowing that an internal frame exists. Normal and
+    // point stay in Novex axes; the browser flips to Three.js
+    // alongside the rest of the scene.
+    const FloorEstimate& f = s.floor;
+
+    const Eigen::Matrix3d originRotation =
+        s.originOrientation.toRotationMatrix();
+
+    const Plane reportedPlane =
+        planeInFrame(f.worldPlane, originRotation, s.originPosition);
+
+    const Eigen::Vector3d reportedPoint = f.worldPlane.valid()
+        ? Eigen::Vector3d(originRotation.transpose() *
+                          (f.floorPointWorld - s.originPosition))
+        : Eigen::Vector3d::Zero();
+
+    json.add(",\"floor\":{\"enabled\":%s,\"valid\":%s,",
+             config.floorEnabled ? "true" : "false",
+             f.valid ? "true" : "false");
+
+    addString(json, "status", floorStatusName(f.status));
+    json.add(",");
+    addString(json, "downSource", floorDownSourceName(f.downSource));
+    json.add(",");
+    addString(json, "detail", f.detail);
+
+    json.add(",\"confidence\":%.4f,\"ageS\":%.3f,"
+             "\"heightM\":%.4f,\"distanceM\":%.4f,"
+             "\"normal\":{\"x\":%.6f,\"y\":%.6f,\"z\":%.6f},"
+             "\"normalCamera\":{\"x\":%.6f,\"y\":%.6f,\"z\":%.6f},"
+             "\"offset\":%.6f,"
+             "\"point\":{\"x\":%.4f,\"y\":%.4f,\"z\":%.4f},"
+             "\"tiltDeg\":%.3f,\"pitchDeg\":%.3f,\"rollDeg\":%.3f,"
+             "\"gravityDeg\":%.3f,"
+             "\"candidates\":%d,\"inliers\":%d,"
+             "\"inlierFraction\":%.4f,\"rmsResidualM\":%.5f,"
+             "\"spanM\":%.4f,\"aboveFraction\":%.4f}",
+             f.confidence, f.ageSeconds,
+             f.cameraHeight, f.distanceToCamera,
+             reportedPlane.normal.x(), reportedPlane.normal.y(),
+             reportedPlane.normal.z(),
+             f.normalCamera.x(), f.normalCamera.y(), f.normalCamera.z(),
+             reportedPlane.offset,
+             reportedPoint.x(), reportedPoint.y(), reportedPoint.z(),
+             f.tiltDegrees, f.pitchDegrees, f.rollDegrees,
+             f.gravityAngleDegrees,
+             f.candidateCount, f.inlierCount,
+             f.inlierFraction, f.rmsResidualM,
+             f.spanMeters, f.aboveFraction);
 }
 
 } // namespace
@@ -891,7 +959,11 @@ size_t StateServer::formatState(char* buffer, size_t size) const
         "\"gyro_bias\":[%.6f,%.6f,%.6f],"
         "\"frame_id\":%llu,"
         "\"dropped_frames\":%llu,"
-        "\"lost_frames\":%d}\n",
+        "\"lost_frames\":%d,"
+        "\"floor_valid\":%s,"
+        "\"floor_status\":\"%s\","
+        "\"floor_height\":%.4f,"
+        "\"floor_confidence\":%.3f}\n",
         state.timestamp,
         state.position.x(), state.position.y(), state.position.z(),
         state.velocity.x(), state.velocity.y(), state.velocity.z(),
@@ -906,7 +978,106 @@ size_t StateServer::formatState(char* buffer, size_t size) const
         state.gyroBias.x(), state.gyroBias.y(), state.gyroBias.z(),
         static_cast<unsigned long long>(state.frameId),
         static_cast<unsigned long long>(state.droppedFrames),
-        state.lostFrames
+        state.lostFrames,
+        snapshot.floor.valid ? "true" : "false",
+        floorStatusName(snapshot.floor.status),
+        snapshot.floor.cameraHeight,
+        snapshot.floor.confidence
+    ));
+}
+
+// The full ground estimate, in both frames plus the reported one.
+//
+// A consumer that only wants "how high am I" reads floor_height from
+// GET_STATE. A consumer placing a virtual floor wants the world plane
+// from here, because that is the one that stays put while the head
+// turns.
+size_t StateServer::formatFloor(char* buffer, size_t size) const
+{
+    const VIOSnapshot snapshot = vio.snapshot();
+    const FloorEstimate& floor = snapshot.floor;
+
+    // The world plane lives in the INTERNAL frame. Everything else the
+    // server reports is in the RECENTERED frame, so convert it rather
+    // than handing out two different conventions under one roof.
+    const Eigen::Matrix3d originRotation =
+        snapshot.originOrientation.toRotationMatrix();
+
+    const Plane reported = planeInFrame(floor.worldPlane,
+                                        originRotation,
+                                        snapshot.originPosition);
+
+    const Eigen::Vector3d reportedPoint = floor.worldPlane.valid()
+        ? Eigen::Vector3d(originRotation.transpose() *
+                          (floor.floorPointWorld - snapshot.originPosition))
+        : Eigen::Vector3d::Zero();
+
+    return static_cast<size_t>(snprintf(
+        buffer,
+        size,
+        "{\"valid\":%s,"
+        "\"status\":\"%s\","
+        "\"down_source\":\"%s\","
+        "\"confidence\":%.4f,"
+        "\"timestamp\":%.6f,"
+        "\"frame_id\":%llu,"
+        "\"age_s\":%.3f,"
+        "\"camera_plane\":[%.6f,%.6f,%.6f,%.6f],"
+        "\"world_plane\":[%.6f,%.6f,%.6f,%.6f],"
+        "\"reported_plane\":[%.6f,%.6f,%.6f,%.6f],"
+        "\"normal_camera\":[%.6f,%.6f,%.6f],"
+        "\"normal_world\":[%.6f,%.6f,%.6f],"
+        "\"distance_m\":%.4f,"
+        "\"height_m\":%.4f,"
+        "\"floor_point_camera\":[%.4f,%.4f,%.4f],"
+        "\"floor_point_world\":[%.4f,%.4f,%.4f],"
+        "\"floor_point_reported\":[%.4f,%.4f,%.4f],"
+        "\"tilt_deg\":%.3f,"
+        "\"pitch_deg\":%.3f,"
+        "\"roll_deg\":%.3f,"
+        "\"gravity_deg\":%.3f,"
+        "\"candidates\":%d,"
+        "\"inliers\":%d,"
+        "\"inlier_fraction\":%.4f,"
+        "\"rms_residual_m\":%.5f,"
+        "\"span_m\":%.4f,"
+        "\"above_fraction\":%.4f,"
+        "\"detail\":\"%s\"}\n",
+        floor.valid ? "true" : "false",
+        floorStatusName(floor.status),
+        floorDownSourceName(floor.downSource),
+        floor.confidence,
+        floor.timestamp,
+        static_cast<unsigned long long>(floor.frameId),
+        floor.ageSeconds,
+        floor.cameraPlane.normal.x(), floor.cameraPlane.normal.y(),
+        floor.cameraPlane.normal.z(), floor.cameraPlane.offset,
+        floor.worldPlane.normal.x(), floor.worldPlane.normal.y(),
+        floor.worldPlane.normal.z(), floor.worldPlane.offset,
+        reported.normal.x(), reported.normal.y(),
+        reported.normal.z(), reported.offset,
+        floor.normalCamera.x(), floor.normalCamera.y(),
+        floor.normalCamera.z(),
+        floor.normalWorld.x(), floor.normalWorld.y(),
+        floor.normalWorld.z(),
+        floor.distanceToCamera,
+        floor.cameraHeight,
+        floor.floorPointCamera.x(), floor.floorPointCamera.y(),
+        floor.floorPointCamera.z(),
+        floor.floorPointWorld.x(), floor.floorPointWorld.y(),
+        floor.floorPointWorld.z(),
+        reportedPoint.x(), reportedPoint.y(), reportedPoint.z(),
+        floor.tiltDegrees,
+        floor.pitchDegrees,
+        floor.rollDegrees,
+        floor.gravityAngleDegrees,
+        floor.candidateCount,
+        floor.inlierCount,
+        floor.inlierFraction,
+        floor.rmsResidualM,
+        floor.spanMeters,
+        floor.aboveFraction,
+        floor.detail ? floor.detail : ""
     ));
 }
 
@@ -1094,9 +1265,21 @@ size_t StateServer::formatDiagnostics(char* buffer, size_t size) const
     JsonWriter json(buffer, size);
 
     json.add("{");
-    addDiagnostics(json, s, vio.pointChannel().summary(),
+    addDiagnostics(json, config, s, vio.pointChannel().summary(),
                    pointBytes.load(), pointMessages.load());
     json.add("}\n");
+
+    if (json.truncated())
+    {
+        LOG_WARN_EVERY(5.0,
+                       "ipc: the diagnostics object does not fit in "
+                       "%zu bytes and was truncated", size);
+
+        return static_cast<size_t>(snprintf(
+            buffer, size,
+            "{\"error\":\"diagnostics exceeded the response buffer\"}\n"
+        ));
+    }
 
     return json.length();
 }
@@ -1203,10 +1386,21 @@ size_t StateServer::formatStream(char* buffer, size_t size) const
 
     JsonWriter json(buffer + head, size - static_cast<size_t>(head));
 
-    addDiagnostics(json, s, vio.pointChannel().summary(),
+    addDiagnostics(json, config, s, vio.pointChannel().summary(),
                    pointBytes.load(), pointMessages.load());
 
     json.add("}\n");
+
+    if (json.truncated())
+    {
+        // Dropping the update is the only safe move: half an object
+        // would desynchronise every subscriber's parser.
+        LOG_WARN_EVERY(5.0,
+                       "ipc: the state stream object does not fit in "
+                       "%zu bytes and was dropped", size);
+
+        return 0;
+    }
 
     return static_cast<size_t>(head) + json.length();
 }
@@ -1214,7 +1408,10 @@ size_t StateServer::formatStream(char* buffer, size_t size) const
 bool StateServer::handleCommand(Client& client,
                                 const std::string& command)
 {
-    char response[8192];
+    // Sized for the largest reply, which is GET_DIAGNOSTICS: the
+    // geometry, drift, stationary, point cloud and floor objects in
+    // one message. Matches the push stream's buffer.
+    char response[16384];
     size_t length = 0;
 
     // Split into a verb and an optional argument.
@@ -1249,6 +1446,10 @@ bool StateServer::handleCommand(Client& client,
     else if (verb == "GET_STATUS")
     {
         length = formatStatus(response, sizeof(response));
+    }
+    else if (verb == "GET_FLOOR")
+    {
+        length = formatFloor(response, sizeof(response));
     }
     else if (verb == "GET_CAMERA")
     {

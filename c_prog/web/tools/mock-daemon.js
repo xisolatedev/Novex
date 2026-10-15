@@ -32,7 +32,56 @@ function state()
 
     const yaw = -t * 0.5;
 
+    // ---- synthetic floor ----
+    //
+    // A level floor 1.5 m below the start pose. In Novex axes Y is
+    // DOWN, so the upward normal is (0, -1, 0) and the plane through
+    // y = 1.5 is -y + 1.5 = 0. Height is then n.C + d = 1.5 - y,
+    // which follows the mock camera's bob exactly as the real
+    // estimator would.
+    //
+    // The status cycles on a 24 s loop so every UI state - tracking,
+    // predicting, and GROUND UNKNOWN - can actually be looked at
+    // without a camera. Synthetic, like everything else here.
+    const phase = (t % 24) / 24;
+
+    const floorStatus = phase < 0.66 ? 'TRACKING'
+        : phase < 0.83 ? 'PREDICTING'
+        : 'UNKNOWN';
+
+    const floorValid = floorStatus !== 'UNKNOWN';
+
+    const floorHeight = 1.5 - y;
+
+    const floor = {
+        enabled: true,
+        valid: floorValid,
+        status: floorStatus,
+        downSource: 'nominal',
+        detail: floorValid ? 'measured' : 'too few stereo points with usable depth',
+        confidence: floorStatus === 'TRACKING' ? 0.72
+            : floorStatus === 'PREDICTING' ? 0.28 : 0,
+        ageS: floorStatus === 'PREDICTING' ? (phase - 0.66) * 24 : 0.08,
+        heightM: floorValid ? floorHeight : 0,
+        distanceM: floorValid ? Math.abs(floorHeight) : 0,
+        normal: { x: 0, y: -1, z: 0 },
+        normalCamera: { x: 0, y: -1, z: 0 },
+        offset: 1.5,
+        point: { x, y: 1.5, z },
+        tiltDeg: 0.4,
+        pitchDeg: 0.3,
+        rollDeg: -0.2,
+        gravityDeg: -1,
+        candidates: 168,
+        inliers: floorStatus === 'TRACKING' ? 131 : 0,
+        inlierFraction: floorStatus === 'TRACKING' ? 0.78 : 0,
+        rmsResidualM: 0.019,
+        spanM: 2.4,
+        aboveFraction: 0.93,
+    };
+
     return {
+        floor,
         type: 'vio_state',
         timestamp: t,
         position: { x, y, z },

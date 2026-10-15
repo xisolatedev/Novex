@@ -743,7 +743,7 @@ rate, since the dashboard cannot use more. Full table in
 [web/README.md](web/README.md).
 
 The daemon's own socket protocol gained `GET_DEBUG`, `GET_STATUS`,
-`GET_CAMERA`, `GET_DIAGNOSTICS`, `SUBSCRIBE <hz>`/`UNSUBSCRIBE`,
+`GET_CAMERA`, `GET_DIAGNOSTICS`, `GET_FLOOR`, `SUBSCRIBE <hz>`/`UNSUBSCRIBE`,
 `SUBSCRIBE_POINTS <hz>`/`UNSUBSCRIBE_POINTS`, and the control verbs
 (including `STATIONARY on|off` and `CLEAR_MAP`), so `novex-state` and
 any other local consumer can use them too.
@@ -755,6 +755,66 @@ leave the machine. It has no authentication and can reset the
 estimator. `--web-host` exists but pointing it at `0.0.0.0` publishes
 unauthenticated control of the vehicle's estimator to the network — do
 not do that on a network you do not trust.
+
+---
+
+## Floor / ground estimation
+
+`FloorEstimator` finds the dominant ground plane from the same sparse
+stereo points the point cloud is built from, and tracks it in the
+estimator's internal world frame so that turning the camera does not
+move the floor. It is geometric: no neural network is involved, and no
+image-space assumption such as "the floor is the bottom of the frame"
+is made, because a headset can look up and a drone can look backwards.
+
+**Plane convention.** `n · X + d = 0`, `|n| = 1`, and `n` always points
+from the floor **towards** the camera. So `height = n · C + d` is the
+signed height of a point above the floor. Camera height is never a
+world Y coordinate — the internal world frame is the first tracked
+camera pose and is not gravity aligned.
+
+**Two rates.** Measurement runs at `floor.update_hz` (default 6 Hz);
+prediction — re-expressing the world plane in the current camera frame
+— runs every frame and costs about 0.1 µs.
+
+**Acquisition is not generic RANSAC.** When an up direction is known
+(IMU gravity, the tracked normal, or the start-up upright assumption)
+the normal is fixed and only the offset is unknown, so acquisition is a
+1D search for the **lowest** significant height cluster. That is
+deterministic, O(n), and it cannot pick a table top over the floor the
+way a support-maximising RANSAC does. Only with no up direction at all
+does it fall back to constrained 3-point RANSAC, and the confidence is
+penalised accordingly. The fit itself is IRLS with a Huber weight over
+the total-least-squares plane.
+
+**Gates**: minimum inliers and inlier fraction, RMS residual, in-plane
+extent (rejects the wall/floor seam), a plausible camera height, the
+fraction of the scene on or above the plane (rejects ceilings), and
+angle to gravity when it is known. Failing any of them reports
+`GROUND_UNKNOWN` rather than a confident guess.
+
+The dashboard shows it too: a **Floor** panel (status, confidence,
+camera height, normal, tilt, gravity disagreement, support and fit
+quality) and a **Floor plane** layer that draws the plane, its grid,
+its normal and a dashed drop line from the camera down to it. The
+plane is sent in the reported frame, so it hangs off the same scene
+node as the camera and recentring moves both together.
+`node web/tools/mock-daemon.js` emits a synthetic floor that cycles
+through TRACKING / PREDICTING / GROUND UNKNOWN, so the panel and the
+layer can be exercised with no camera attached.
+
+`GET_FLOOR` returns the plane in the camera, internal-world and
+reported frames, the normal, distance, signed height, the floor point
+under the camera, tilt/pitch/roll relative to the floor, the gravity
+disagreement, and the support statistics. `GET_STATE` carries a short
+summary (`floor_valid`, `floor_status`, `floor_height`,
+`floor_confidence`).
+
+**Validation.** `novex-floor-test` runs fourteen synthetic scenes with
+known ground truth — flat floor, noise and outliers, tilt, rotation,
+translation, partial visibility, furniture, wall-dominated, ceiling,
+loss and reacquisition, IMU gravity, the unconstrained fallback, and
+determinism — plus a benchmark. No camera required.
 
 ---
 

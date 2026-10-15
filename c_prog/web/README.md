@@ -3,7 +3,8 @@
 Development visualisation for the Novex VIO daemon: a Three.js scene
 showing the estimated pose, the trajectory and a live 3D feature point
 cloud (live points, an accumulated map, an optional experimental
-mesh), plus live pipeline timings and geometry diagnostics.
+mesh), the estimated floor plane, plus live pipeline timings and
+geometry diagnostics.
 
 **This is a diagnostic tool, not a product.** It has no
 authentication, it can reset the estimator, and it binds to loopback
@@ -82,7 +83,7 @@ second copy:
 | GET | `/api/v1/performance` | per-stage timings |
 | GET | `/api/v1/debug` | `--debug` statistics, or `enabled:false` |
 | GET | `/api/v1/camera` | negotiated camera mode |
-| GET | `/api/v1/diagnostics` | geometry, drift, stationary test, point cloud counters |
+| GET | `/api/v1/diagnostics` | geometry, drift, stationary test, point cloud counters, floor |
 | GET | `/api/v1/pointcloud` | daemon point counters + relay mirror and delivery stats |
 | GET | `/api/v1/health` | relay health, client count, point rate |
 | POST | `/api/v1/vio/reset` | restart tracking and estimator |

@@ -1,0 +1,3 @@
+# fc-controller: OpenCV/NumPy (via camera_stream); tkinter from the system Python
+opencv-python>=4.8.0
+numpy>=1.24.0

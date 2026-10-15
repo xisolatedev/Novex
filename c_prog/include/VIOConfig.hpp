@@ -185,6 +185,120 @@ struct VIOConfig
     // Independent of the VIO rate.
     double pointCloudPublishHz = 15.0;
 
+    // ---- floor / ground estimation ----
+    //
+    // Estimates the ground plane from the stereo points the pipeline
+    // already produces. Runs at its own rate; see FloorEstimator.hpp
+    // for the frames and the plane convention.
+
+    bool floorEnabled = true;
+
+    // Rate of the full measurement cycle. Prediction still runs every
+    // frame, and costs almost nothing. 6 Hz is plenty for a floor:
+    // it does not move.
+    double floorUpdateHz = 6.0;
+
+    // Hard cap on the points one measurement considers. Candidates
+    // beyond this are decimated deterministically.
+    int floorMaxPoints = 300;
+
+    // ---- candidate gates ----
+    double floorMinDepth = 0.25;              // metres
+    double floorMaxDepth = 6.0;
+    double floorMaxDepthSigma = 0.15;         // relative, at 1 px
+    double floorMaxStereoResidualPx = 2.5;
+    int    floorMinTrackAge = 1;              // frames
+    bool   floorRequireMotionInlier = false;
+
+    // ---- acquisition ----
+
+    // Bin width of the height histogram used when an up direction is
+    // known, metres.
+    double floorHeightBinM = 0.05;
+
+    // A height cluster counts as significant at this fraction of the
+    // largest cluster in the scene. The LOWEST significant cluster is
+    // taken as the floor, which is what keeps a table top or a desk
+    // from winning on sheer point count.
+    double floorClusterPeakFraction = 0.25;
+
+    // Half-width of the seed band around the chosen cluster, metres.
+    double floorClusterBandM = 0.08;
+
+    // Inlier band of a fitted plane, metres.
+    double floorInlierBandM = 0.05;
+
+    // Band searched around the already-tracked plane, metres. Wider
+    // than the inlier band so a slowly changing floor is still found.
+    double floorPriorBandM = 0.12;
+
+    // Hypotheses tried when there is no up direction at all.
+    int floorRansacIterations = 80;
+
+    // ---- validation ----
+    int    floorMinInliers = 25;
+    double floorMinInlierFraction = 0.12;
+    double floorMaxResidualM = 0.05;
+    double floorMinSpanM = 0.30;              // in-plane extent
+    double floorMinHeightM = 0.05;
+    double floorMaxHeightM = 4.0;
+
+    // Fraction of candidate points that must lie on or above the
+    // plane. A ceiling fails this outright.
+    double floorMinAboveFraction = 0.75;
+
+    // Maximum angle between the floor normal and the up direction,
+    // when one is known.
+    double floorMaxTiltDeg = 25.0;
+
+    // ---- fitting ----
+    int    floorIrlsIterations = 4;
+    double floorHuberM = 0.03;                // metres
+
+    // ---- temporal ----
+
+    // Blend gain, scaled by the measurement's confidence.
+    double floorBlendAlpha = 0.5;
+
+    // Confidence decays with this time constant while no measurement
+    // is accepted.
+    double floorDecayTauSeconds = 2.0;
+
+    int    floorMinInitObservations = 3;
+    double floorTrackingConfidence = 0.40;
+    double floorLostConfidence = 0.15;
+    double floorUnknownConfidence = 0.05;
+
+    // A measurement further than this from the tracked plane is
+    // rejected as an outlier - until floorReacquireAfter of them in a
+    // row, at which point the tracked plane is abandoned.
+    double floorMaxJumpDeg = 12.0;
+    double floorMaxJumpM = 0.25;
+    int    floorReacquireAfter = 5;
+
+    // ---- gravity ----
+
+    bool   floorUseGravity = true;
+
+    // up = floor_accel_sign * normalise(acceleration). +1 for an IMU
+    // reporting specific force, which is the usual case; -1 for one
+    // whose driver already negates it.
+    double floorAccelSign = 1.0;
+
+    // A sample is used for gravity only when |a| is within this
+    // fraction of 1 g and the gyro is below the threshold.
+    double floorGravityToleranceRatio = 0.12;
+    double floorStaticGyroThreshold = 0.35;   // rad/s
+    double floorGravityAlpha = 0.05;
+
+    // With no IMU, assume the device was roughly upright at start-up,
+    // so world down is the camera's +Y at that moment. Reported as
+    // downSource = nominal and penalised in the confidence, never
+    // silently treated as a measurement.
+    bool floorAssumeUprightStart = true;
+
+    std::array<double, 3> floorNominalDownWorld = {0.0, 1.0, 0.0};
+
     // ---- IMU ----
 
     // Backend name. "none" disables it entirely. "iio" reads a Linux

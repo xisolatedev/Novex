@@ -4,6 +4,7 @@
 #include "DebugStatistics.hpp"
 #include "Diagnostics.hpp"
 #include "FeatureTracker.hpp"
+#include "FloorEstimator.hpp"
 #include "IMU.hpp"
 #include "MotionEstimator.hpp"
 #include "PointCloud.hpp"
@@ -67,6 +68,11 @@ struct VIOSnapshot
     double voxelSize = 0.0;
     uint32_t mapEpoch = 0;
     PointCloudCounters pointCounters;
+
+    // Ground plane estimate. Its planes are in the CAMERA frame and
+    // the INTERNAL world frame; use planeInFrame() with the origin
+    // below to express the world plane in the reported frame.
+    FloorEstimate floor;
 
     // Recenter origin inside the internal frame, as a quaternion and
     // position. Lets a viewer that stores data in the internal frame
@@ -147,6 +153,19 @@ public:
 
     const PointMap& pointMap() const { return map; }
 
+    // Ground plane. Same threading rule as features(): the estimator
+    // itself is touched only from the VIO thread, while the copyable
+    // estimate travels in the snapshot.
+    const FloorEstimator& floorEstimator() const { return floor; }
+    FloorEstimator& floorEstimator() { return floor; }
+
+    // Needed by anything that has to project 3D results back into the
+    // image, which is the GUI and nothing else.
+    const StereoCalibration& stereoCalibration() const
+    {
+        return calibration;
+    }
+
 private:
 
     void publish();
@@ -172,6 +191,8 @@ private:
     void buildPointCloud(const cv::Mat& left, bool poseValid,
                          double timestamp);
 
+    void updateFloor(bool poseValid, double timestamp);
+
     const VIOConfig& config;
     const StereoCalibration& calibration;
 
@@ -181,6 +202,7 @@ private:
     StereoMatcher stereo;
     MotionEstimator motion;
     StateEstimator estimator;
+    FloorEstimator floor;
 
     Profiler timings;
 

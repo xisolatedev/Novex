@@ -144,6 +144,131 @@ function setOrigin(orientation, position)
 // Built directly in Novex camera axes, because it lives under
 // novexFrame: forward is +Z, image-down is +Y.
 
+// ---- floor / ground plane -------------------------------------
+//
+// The daemon sends the plane in the REPORTED frame, so it hangs off
+// novexFrame beside the drone - NOT off internalFrame. Recentring
+// therefore moves it exactly as it moves the camera, with no special
+// case here.
+//
+// PlaneGeometry lies in its own XY plane with its normal along +Z, so
+// orienting it is one setFromUnitVectors from +Z to the floor normal.
+// Nothing here recomputes a plane; it only draws the one it is given.
+
+const floorGroup = new THREE.Group();
+floorGroup.visible = false;
+novexFrame.add(floorGroup);
+
+const floorFill = new THREE.Mesh(
+    new THREE.PlaneGeometry(8, 8),
+    new THREE.MeshBasicMaterial({
+        color: 0x2f81f7,
+        transparent: true,
+        opacity: 0.10,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+    })
+);
+
+floorGroup.add(floorFill);
+
+// A grid on the plane makes its ORIENTATION readable; a flat quad
+// does not. GridHelper is built in the XZ plane, so it is rotated to
+// match the quad's XY convention once, here, and never again.
+const floorGrid = new THREE.GridHelper(8, 16, 0x58a6ff, 0x1f4e79);
+floorGrid.rotation.x = Math.PI / 2;
+floorGroup.add(floorGrid);
+
+// The normal, drawn from the point under the camera.
+const floorNormal = new THREE.ArrowHelper(
+    new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 0),
+    0.5, 0x58a6ff, 0.12, 0.07
+);
+
+floorGroup.add(floorNormal);
+
+// Marks the foot of the perpendicular from the camera.
+const floorMarker = new THREE.Mesh(
+    new THREE.SphereGeometry(0.035, 12, 8),
+    new THREE.MeshBasicMaterial({ color: 0x58a6ff })
+);
+
+floorGroup.add(floorMarker);
+
+// Dropped line from the camera to that point: the camera height, made
+// visible as a length rather than a number.
+const floorDropGeometry = new THREE.BufferGeometry();
+
+floorDropGeometry.setAttribute(
+    'position',
+    new THREE.BufferAttribute(new Float32Array(6), 3)
+);
+
+const floorDrop = new THREE.Line(
+    floorDropGeometry,
+    new THREE.LineDashedMaterial({
+        color: 0x58a6ff,
+        dashSize: 0.06,
+        gapSize: 0.04,
+    })
+);
+
+floorDrop.frustumCulled = false;
+novexFrame.add(floorDrop);
+
+const floorZ = new THREE.Vector3(0, 0, 1);
+const floorNormalVector = new THREE.Vector3();
+const floorPointVector = new THREE.Vector3();
+const floorQuaternion = new THREE.Quaternion();
+
+// Applies one floor estimate to the scene. `f` is the daemon's floor
+// object; anything invalid hides the layer rather than drawing a
+// stale plane.
+function updateFloorScene(f, position)
+{
+    const show = !!(f && f.valid && layers.floor);
+
+    floorGroup.visible = show;
+    floorDrop.visible = show;
+
+    if (!show)
+    {
+        return;
+    }
+
+    floorNormalVector.set(f.normal.x, f.normal.y, f.normal.z);
+
+    if (floorNormalVector.lengthSq() < 1e-9)
+    {
+        floorGroup.visible = false;
+        floorDrop.visible = false;
+        return;
+    }
+
+    floorNormalVector.normalize();
+    floorPointVector.set(f.point.x, f.point.y, f.point.z);
+
+    floorQuaternion.setFromUnitVectors(floorZ, floorNormalVector);
+
+    floorGroup.position.copy(floorPointVector);
+    floorGroup.quaternion.copy(floorQuaternion);
+
+    // The arrow lives inside the rotated group, so in local space the
+    // normal is simply +Z.
+    floorNormal.setDirection(floorZ);
+    floorMarker.position.set(0, 0, 0);
+
+    const drop = floorDropGeometry.attributes.position;
+
+    drop.setXYZ(0, position.x, position.y, position.z);
+    drop.setXYZ(1, floorPointVector.x, floorPointVector.y,
+                floorPointVector.z);
+
+    drop.needsUpdate = true;
+
+    floorDrop.computeLineDistances();
+}
+
 const drone = new THREE.Group();
 novexFrame.add(drone);
 
@@ -1077,6 +1202,7 @@ const layers = {
     trajectory: true,
     camera: true,
     mesh: false,
+    floor: true,
     ids: false,
     depth: true,
     fade: true,
@@ -1161,6 +1287,8 @@ bindLayer('l-fade', (on) =>
     pointUniforms.uFade.value = on ? 20 : 0;
 });
 
+bindLayer('l-floor', (on) => { layers.floor = on; });
+
 bindLayer('l-grid', (on) => { grid.visible = on; });
 
 el('l-size').addEventListener('input', (event) =>
@@ -1222,6 +1350,9 @@ function onState(s)
     const drift = s.drift || {};
     const t = s.timing || {};
     const pc = s.pointCloud || {};
+    const floor = s.floor || {};
+
+    updateFloorScene(floor, s.position);
 
     // ---- status ----
     paused = !!s.paused;
@@ -1354,6 +1485,9 @@ function onState(s)
         ? `${num(pc.innovationPct, 2)} % of range` : '—');
     setText('pc-mesh', layers.mesh ? String(meshTriangles) : 'off');
 
+    // ---- floor ----
+    updateFloor(floor);
+
     // ---- pose ----
     setText('pos-x', num(s.position.x));
     setText('pos-y', num(s.position.y));
@@ -1392,6 +1526,69 @@ function onState(s)
     }
 
     graphs.inliers.push(g.inliers, now);
+}
+
+// The floor panel. Everything shown is measured by the daemon; the
+// browser derives nothing, which is why a lost floor blanks the rows
+// instead of leaving the last numbers on screen looking live.
+function updateFloor(f)
+{
+    if (!f || f.enabled === false)
+    {
+        setText('f-status', 'disabled');
+        setClass('f-status', 'muted');
+        setText('f-height', '—');
+        return;
+    }
+
+    const status = f.status || 'UNKNOWN';
+
+    const klass = status === 'TRACKING' ? 'good'
+        : (status === 'PREDICTING' || status === 'INITIALIZING') ? 'warn'
+        : 'bad';
+
+    setText('f-status', `${status}  (${f.downSource || '—'})`);
+    setClass('f-status', klass);
+
+    // Confidence is a ranking score, not a probability - shown as a
+    // bare number for that reason, never as a percentage.
+    setText('f-conf', num(f.confidence, 2));
+
+    if (!f.valid)
+    {
+        setText('f-height', 'GROUND UNKNOWN');
+        setText('f-distance', '—');
+        setText('f-normal', '—');
+        setText('f-tilt', '—');
+        setText('f-gravity', '—');
+        setText('f-support', '—');
+        setText('f-quality', '—');
+        setText('f-age', '—');
+        setText('f-detail', f.detail || '—');
+        return;
+    }
+
+    setText('f-height', unit(f.heightM, 3, ' m'));
+    setText('f-distance', unit(f.distanceM, 3, ' m'));
+
+    setText('f-normal',
+            `${num(f.normal.x, 3)} ${num(f.normal.y, 3)} ${num(f.normal.z, 3)}`);
+
+    setText('f-tilt',
+            `${unit(f.tiltDeg, 1, '°')}  (p ${num(f.pitchDeg, 1)}° / r ${num(f.rollDeg, 1)}°)`);
+
+    // Negative means no gravity measurement was available at all,
+    // which is a different thing from a disagreement of zero.
+    setText('f-gravity', f.gravityDeg >= 0 ? unit(f.gravityDeg, 2, '°') : 'no IMU gravity');
+
+    setText('f-support',
+            `${f.inliers} / ${f.candidates}  (${(f.inlierFraction * 100).toFixed(0)} %)`);
+
+    setText('f-quality',
+            `${(f.rmsResidualM * 1000).toFixed(1)} mm rms, span ${num(f.spanM, 2)} m`);
+
+    setText('f-age', unit(f.ageS, 1, ' s'));
+    setText('f-detail', f.detail || '');
 }
 
 function updateStationary(r)

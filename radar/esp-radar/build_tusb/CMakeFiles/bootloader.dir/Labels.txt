@@ -1,0 +1,13 @@
+# Target labels
+ bootloader
+# Source files and their labels
+/media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/radar/esp-radar/build_tusb/CMakeFiles/bootloader
+/media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/radar/esp-radar/build_tusb/CMakeFiles/bootloader.rule
+/media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/radar/esp-radar/build_tusb/CMakeFiles/bootloader-complete.rule
+/media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/radar/esp-radar/build_tusb/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule
+/media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/radar/esp-radar/build_tusb/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule
+/media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/radar/esp-radar/build_tusb/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule
+/media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/radar/esp-radar/build_tusb/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule
+/media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/radar/esp-radar/build_tusb/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule
+/media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/radar/esp-radar/build_tusb/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule
+/media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/radar/esp-radar/build_tusb/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule

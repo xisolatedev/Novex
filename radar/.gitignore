@@ -1,0 +1,5 @@
+esp-radar/build/
+esp-radar/sdkconfig.old
+viewer/.venv/
+viewer/__pycache__/
+captures/

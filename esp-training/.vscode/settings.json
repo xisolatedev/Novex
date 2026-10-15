@@ -22,8 +22,8 @@
   "idf.openOcdConfigs": [
     "board/esp32s3-builtin.cfg"
   ],
-  "idf.port": "/dev/ttyACM0",
-  "idf.currentSetup": "/home/isodev/.espressif/.espressif/v6.1/esp-idf",
+  "idf.port": "/dev/ttyS0",
+  "idf.currentSetup": "/home/isodev/.espressif/v6.1/esp-idf",
   "idf.customExtraVars": {
     "IDF_TARGET": "esp32s3"
   },
@@ -33,5 +33,6 @@
     "--query-driver=**",
     "--compile-commands-dir=/media/isodev/ca6ce0f1-5feb-46a1-ae3c-00afd2b5117d/Novex/esp-training/build"
   ],
-  "idf.flashType": "UART"
+  "idf.flashType": "UART",
+  "idf.monitorPort": "/dev/ttyACM0"
 }
