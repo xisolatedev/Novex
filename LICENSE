@@ -1,0 +1,72 @@
+Business Source License 1.1
+
+Parameters
+
+Licensor: Elkon Mechato
+Licensed Work: Novex
+Change Date: 2026-10-15
+Change License: Apache License Version 2.0, or any later version
+
+Copyright (c) 2026 Elkon Mechato
+
+Everyone is permitted to use, copy, modify, and distribute this software, but only under the terms of this Business Source License 1.1 ("BSL").
+
+This License permits use of the Licensed Work for non-commercial and evaluation purposes, and for internal business use only, subject to the conditions below. Any use beyond the permitted scope requires a separate written commercial license from the Licensor.
+
+1. Definitions
+
+"Licensed Work" means the software and associated documentation in this repository, including all source code, scripts, models, configuration files, documentation, and generated assets that are part of the repository.
+
+"Licensor" means Elkon Mechato.
+
+"Commercial Use" means any use of the Licensed Work or any derivative work for direct or indirect commercial advantage, including sale, licensing, distribution, hosting, operation, integration, or support of a product or service in exchange for money, consideration, or other compensation.
+
+2. Rights Granted
+
+Subject to the terms of this License, the Licensor grants you a worldwide, non-exclusive, royalty-free license to use, copy, modify, and redistribute the Licensed Work for non-commercial purposes, provided you preserve the copyright notice, this License, and all required attribution notices.
+
+You may not use the Licensed Work for Commercial Use unless you have obtained a separate written commercial license from the Licensor.
+
+3. Attribution and Notice Requirements
+
+Any copy, modification, redistribution, or derivative work of the Licensed Work must include:
+
+- this License;
+- the copyright notice "Copyright (c) 2026 Elkon Mechato";
+- a copy of the NOTICE file included in this repository; and
+- an attribution statement substantially similar to:
+  "This project is licensed under the Business Source License 1.1. Copyright (c) 2026 Elkon Mechato. Commercial use requires prior written permission from Elkon Mechato."
+
+4. Additional Restrictions
+
+You may not remove or obscure copyright notices, attribution notices, or the required repository notice files.
+
+You may not sublicense any commercial rights without a separate written commercial license from the Licensor.
+
+5. Commercial Licensing
+
+Any person or entity wishing to use the Licensed Work commercially must first obtain a written commercial license from Elkon Mechato. Contact Elkon Mechato for licensing terms, pricing, and usage approval.
+
+6. Termination
+
+If you violate the terms of this License, your rights under this License terminate automatically and immediately.
+
+7. Disclaimer of Warranty
+
+THE LICENSED WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+
+8. Limitation of Liability
+
+IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+9. License Conversion
+
+On or after the Change Date, the Licensed Work may be used under the Change License set forth above, provided all other obligations in this License are satisfied.
+
+10. No Trademark Rights
+
+This License does not grant any rights in the names, logos, or trademarks of the Licensor.
+
+This License is governed by the laws of the jurisdiction where the Licensor is located, without regard to conflict of law principles.
+
+For the avoidance of doubt, this is a source-available, restricted software license intended to protect the Licensor's rights and to require commercial permission before commercial use.
