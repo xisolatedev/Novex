@@ -1,0 +1,90 @@
+** Drc report for novex_rasp_hat.kicad_pcb **
+** Created on 2026-10-16T08:02:15 **
+** Report includes: Errors, Warnings, Exclusions **
+
+** Found 5 DRC violations **
+[lib_footprint_mismatch]: Footprint 'PinSocket_2x20_P2.54mm_Vertical' does not match copy in library 'Connector_PinSocket_2.54mm'
+    Local override; warning
+    @(108.3700 mm, 74.7700 mm): Footprint J1
+[text_height]: Text height out of range (board setup constraints silk text height min height 0.8000 mm; actual 0.5000 mm)
+    Rule: board setup constraints silk text height; warning
+    @(127.9000 mm, 96.0000 mm): Reference field of TP1
+[text_height]: Text height out of range (board setup constraints silk text height min height 0.8000 mm; actual 0.5000 mm)
+    Rule: board setup constraints silk text height; warning
+    @(130.4500 mm, 96.0000 mm): Reference field of TP2
+[text_height]: Text height out of range (board setup constraints silk text height min height 0.8000 mm; actual 0.5000 mm)
+    Rule: board setup constraints silk text height; warning
+    @(133.0000 mm, 96.0000 mm): Reference field of TP3
+[text_height]: Text height out of range (board setup constraints silk text height min height 0.8000 mm; actual 0.5000 mm)
+    Rule: board setup constraints silk text height; warning
+    @(135.5500 mm, 96.0000 mm): Reference field of TP4
+
+** Found 14 unconnected pads **
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(108.3700 mm, 74.7700 mm): PTH pad 1 [+3V3] of J1
+    @(128.6900 mm, 74.7700 mm): PTH pad 17 [+3V3] of J1
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(108.3700 mm, 72.2300 mm): PTH pad 2 [+5V] of J1
+    @(110.9100 mm, 72.2300 mm): PTH pad 4 [+5V] of J1
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(113.4500 mm, 72.2300 mm): PTH pad 6 [GND] of J1
+    @(118.5300 mm, 74.7700 mm): PTH pad 9 [GND] of J1
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(123.6100 mm, 72.2300 mm): PTH pad 14 [GND] of J1
+    @(118.5300 mm, 74.7700 mm): PTH pad 9 [GND] of J1
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(131.2300 mm, 72.2300 mm): PTH pad 20 [GND] of J1
+    @(123.6100 mm, 72.2300 mm): PTH pad 14 [GND] of J1
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(138.8500 mm, 74.7700 mm): PTH pad 25 [GND] of J1
+    @(131.2300 mm, 72.2300 mm): PTH pad 20 [GND] of J1
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(143.9300 mm, 72.2300 mm): PTH pad 30 [GND] of J1
+    @(138.8500 mm, 74.7700 mm): PTH pad 25 [GND] of J1
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(149.0100 mm, 72.2300 mm): PTH pad 34 [GND] of J1
+    @(143.9300 mm, 72.2300 mm): PTH pad 30 [GND] of J1
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(156.6300 mm, 74.7700 mm): PTH pad 39 [GND] of J1
+    @(149.0100 mm, 72.2300 mm): PTH pad 34 [GND] of J1
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(141.1000 mm, 90.4600 mm): PTH pad SH [unconnected-(J2-Shield-PadSH)] of J2
+    @(153.9000 mm, 90.4600 mm): PTH pad SH [unconnected-(J2-Shield-PadSH)] of J2
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(135.5500 mm, 98.0000 mm): Pad 1 [Net-(J2-GND)] of TP4 on F.Cu
+    @(151.0000 mm, 86.7600 mm): Pad 4 [Net-(J2-GND)] of J2 on F.Cu
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(127.9000 mm, 98.0000 mm): Pad 1 [Net-(J2-VBUS)] of TP1 on F.Cu
+    @(144.0000 mm, 86.7600 mm): Pad 1 [Net-(J2-VBUS)] of J2 on F.Cu
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(133.0000 mm, 98.0000 mm): Pad 1 [Net-(J2-D-)] of TP3 on F.Cu
+    @(146.5000 mm, 86.7600 mm): Pad 2 [Net-(J2-D-)] of J2 on F.Cu
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(130.4500 mm, 98.0000 mm): Pad 1 [Net-(J2-D+)] of TP2 on F.Cu
+    @(148.5000 mm, 86.7600 mm): Pad 3 [Net-(J2-D+)] of J2 on F.Cu
+
+** Found 0 Footprint errors **
+
+** Ignored checks **
+    - Footprint has no courtyard defined
+    - Track endpoint not centered on via
+    - Tuning profile track geometries
+    - Footprint doesn't match symbol's footprint filters
+    - PTH inside courtyard
+    - NPTH inside courtyard
+
+** End of Report **

@@ -1,9 +1,9 @@
 Item Name,Qty,Price (total) (USD),Item link,Column 1,Notes
-Drone,1,25,https://www.aliexpress.us/item/3256813019150116.html,,"This is the main part, we build one drone at a time so then a swarm can be fully built"
+Drone,1,20,https://www.aliexpress.us/item/3256813019150116.html,,"This is the main part, we build one drone at a time so then a swarm can be fully built"
 Stereo Camera,1,50,https://www.ebay.com/itm/355022303029?var=624295077746-ebay,,"This is the camera system, Stereoscopic 1.3mm (180dg fov) Camera for tracking movement, realtime location with slam, and distance/object detection and avoidance."
-Esp32 s3,1,5,https://www.aliexpress.us/item/3256809144013621.html-alliexpress,,This is the motor controller and low level accessor of the drone
+Esp32 s3,1,2,https://www.aliexpress.us/item/3256808936651343,,This is the motor controller and low level accessor of the drone
 Raspberry Pi Zero 2w,1,15,https://www.microcenter.com/product/643085/raspberry-pi-zero-2-w Mirco center - can buy it from retail store.,,"This is the brain of the drone, processor, and memory controller."
-4G Module,1,25,https://www.aliexpress.us/item/2251832666175701.html-alliexpress,,"Internet connectivity and streaming, also has gps."
+DX-LR30 LoRA module,,10,https://www.aliexpress.us/item/3256809646714928.html,,For peer to peer connection of the drones and has base stations and relay stations
 5000 mah Battery,1,10,https://www.aliexpress.us/item/3256812792239451.html,,This is for powering the main board
 ,,,,,
 SENSORS,,,,,
@@ -14,5 +14,5 @@ BME280 barometric sensor,,14.95,https://www.adafruit.com/product/2652,,"Air pres
 OPTIONAL,,,,,
 ReSpeaker 2-Mics Pi HAT V2.0,1,13.99,https://www.seeedstudio.com/ReSpeaker-2-Mics-Pi-HAT.html,,Dual microphones for voice input; onboard codec and speaker output. Confirm driver/physical compatibility with Pi Zero 2 W.
 Mono enclosed speaker 3W 4 Ohm,1,3.95,https://www.adafruit.com/product/3351,,"Voice response output via compatible ReSpeaker JST speaker connection; listed speaker weighs 26.4g, assess payload."
-,,,,,
-Total,,194.4,,,
+4G Module,1,25,https://www.aliexpress.us/item/2251832666175701.html-alliexpress,,"Internet connectivity and streaming, also has gps."
+Total,,171.4,,,

@@ -1,0 +1,106 @@
+** Drc report for novex_rasp_hat.kicad_pcb **
+** Created on 2026-10-16T07:37:34 **
+** Report includes: Errors, Warnings, Exclusions **
+
+** Found 14 DRC violations **
+[solder_mask_bridge]: Front solder mask aperture bridges items with different nets
+    Rule: board setup solder mask min width; error
+    @(133.0000 mm, 97.5000 mm): Track [<no net>] on F.Cu, length 1.0000 mm
+    @(133.0000 mm, 97.5000 mm): Pad 1 [<no net>] of TP1 on F.Cu
+[solder_mask_bridge]: Front solder mask aperture bridges items with different nets
+    Rule: board setup solder mask min width; error
+    @(133.0000 mm, 96.5000 mm): Track [<no net>] on F.Cu, length 4.2426 mm
+    @(133.0000 mm, 97.5000 mm): Pad 1 [<no net>] of TP1 on F.Cu
+[solder_mask_bridge]: Front solder mask aperture bridges items with different nets
+    Rule: board setup solder mask min width; error
+    @(146.0000 mm, 93.5000 mm): Track [<no net>] on F.Cu, length 7.7500 mm
+    @(146.0000 mm, 85.7500 mm): Pad 1 [<no net>] of J2 on F.Cu
+[solder_mask_bridge]: Front solder mask aperture bridges items with different nets
+    Rule: board setup solder mask min width; error
+    @(134.5000 mm, 97.5000 mm): Track [<no net>] on F.Cu, length 1.5000 mm
+    @(134.5000 mm, 97.5000 mm): Pad 1 [<no net>] of TP2 on F.Cu
+[solder_mask_bridge]: Front solder mask aperture bridges items with different nets
+    Rule: board setup solder mask min width; error
+    @(148.5000 mm, 94.5000 mm): Track [<no net>] on F.Cu, length 8.7500 mm
+    @(148.5000 mm, 85.7500 mm): Pad 2 [<no net>] of J2 on F.Cu
+[solder_mask_bridge]: Front solder mask aperture bridges items with different nets
+    Rule: board setup solder mask min width; error
+    @(136.0000 mm, 97.5000 mm): Track [<no net>] on F.Cu, length 2.0000 mm
+    @(136.0000 mm, 97.5000 mm): Pad 1 [<no net>] of TP3 on F.Cu
+[solder_mask_bridge]: Front solder mask aperture bridges items with different nets
+    Rule: board setup solder mask min width; error
+    @(150.5000 mm, 95.5000 mm): Track [<no net>] on F.Cu, length 9.7500 mm
+    @(150.5000 mm, 85.7500 mm): Pad 3 [<no net>] of J2 on F.Cu
+[solder_mask_bridge]: Front solder mask aperture bridges items with different nets
+    Rule: board setup solder mask min width; error
+    @(137.5000 mm, 97.5000 mm): Track [<no net>] on F.Cu, length 15.5000 mm
+    @(137.5000 mm, 97.5000 mm): Pad 1 [<no net>] of TP4 on F.Cu
+[solder_mask_bridge]: Front solder mask aperture bridges items with different nets
+    Rule: board setup solder mask min width; error
+    @(153.0000 mm, 97.5000 mm): Track [<no net>] on F.Cu, length 11.7500 mm
+    @(153.0000 mm, 85.7500 mm): Pad 4 [<no net>] of J2 on F.Cu
+[lib_footprint_mismatch]: Footprint 'PinSocket_2x20_P2.54mm_Vertical' does not match copy in library 'Connector_PinSocket_2.54mm'
+    Local override; warning
+    @(108.3700 mm, 74.7700 mm): Footprint J1
+[text_height]: Text height out of range (board setup constraints silk text height min height 0.8000 mm; actual 0.6000 mm)
+    Rule: board setup constraints silk text height; warning
+    @(136.0000 mm, 95.5000 mm): PCB text 'D-' on F.Silkscreen
+[text_height]: Text height out of range (board setup constraints silk text height min height 0.8000 mm; actual 0.6000 mm)
+    Rule: board setup constraints silk text height; warning
+    @(134.5000 mm, 95.5000 mm): PCB text 'D+' on F.Silkscreen
+[text_height]: Text height out of range (board setup constraints silk text height min height 0.8000 mm; actual 0.5000 mm)
+    Rule: board setup constraints silk text height; warning
+    @(139.0000 mm, 97.5000 mm): PCB text 'GND' on F.Silkscreen
+[text_height]: Text height out of range (board setup constraints silk text height min height 0.8000 mm; actual 0.5000 mm)
+    Rule: board setup constraints silk text height; warning
+    @(131.5000 mm, 97.5000 mm): PCB text 'VNC' on F.Silkscreen
+
+** Found 9 unconnected pads **
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(108.3700 mm, 74.7700 mm): PTH pad 1 [+3V3] of J1
+    @(128.6900 mm, 74.7700 mm): PTH pad 17 [+3V3] of J1
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(108.3700 mm, 72.2300 mm): PTH pad 2 [+5V] of J1
+    @(110.9100 mm, 72.2300 mm): PTH pad 4 [+5V] of J1
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(113.4500 mm, 72.2300 mm): PTH pad 6 [GND] of J1
+    @(118.5300 mm, 74.7700 mm): PTH pad 9 [GND] of J1
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(123.6100 mm, 72.2300 mm): PTH pad 14 [GND] of J1
+    @(118.5300 mm, 74.7700 mm): PTH pad 9 [GND] of J1
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(131.2300 mm, 72.2300 mm): PTH pad 20 [GND] of J1
+    @(123.6100 mm, 72.2300 mm): PTH pad 14 [GND] of J1
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(138.8500 mm, 74.7700 mm): PTH pad 25 [GND] of J1
+    @(131.2300 mm, 72.2300 mm): PTH pad 20 [GND] of J1
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(143.9300 mm, 72.2300 mm): PTH pad 30 [GND] of J1
+    @(138.8500 mm, 74.7700 mm): PTH pad 25 [GND] of J1
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(149.0100 mm, 72.2300 mm): PTH pad 34 [GND] of J1
+    @(143.9300 mm, 72.2300 mm): PTH pad 30 [GND] of J1
+[unconnected_items]: Missing connection between items
+    Local override; error
+    @(156.6300 mm, 74.7700 mm): PTH pad 39 [GND] of J1
+    @(149.0100 mm, 72.2300 mm): PTH pad 34 [GND] of J1
+
+** Found 0 Footprint errors **
+
+** Ignored checks **
+    - Footprint has no courtyard defined
+    - Track endpoint not centered on via
+    - Tuning profile track geometries
+    - Footprint doesn't match symbol's footprint filters
+    - PTH inside courtyard
+    - NPTH inside courtyard
+
+** End of Report **
