@@ -8,11 +8,11 @@ Novex is an experimental embodied AI platform that connects AI, drones, spatial 
 
 **Novex** is an experimental embodied AI platform designed to connect artificial intelligence with the physical world through autonomous robotic systems.
 
-Novex combines **AI reasoning, real-time control, computer vision, SLAM, spatial computing, VR, wireless communication, and robotic agents** into a single ecosystem.
+Novex combines **AI reasoning, real-time control, computer vision, SLAM, spatial computing, wireless communication, and robotic agents** into a single ecosystem.
 
-The goal is simple:
+The goal is
 
-> **Give AI the ability to perceive, understand, and interact with the physical world.**
+> **Giving AI the ability to perceive, understand, and interact with the physical world.**
 
 ---
 
@@ -20,55 +20,7 @@ The goal is simple:
 
 Novex is designed as a layered system rather than one large AI model.
 
-```text
-                         HUMAN
-                           │
-                    Voice / Gesture
-                           │
-                           ▼
-                    ┌────────────┐
-                    │   PHONE    │
-                    │ Controller │
-                    └─────┬──────┘
-                          │
-                          ▼
-                    ┌────────────┐
-                    │    NOVA    │
-                    │ AI / LLM   │
-                    └─────┬──────┘
-                          │
-                     Mission Goal
-                          │
-                          ▼
-                    ┌────────────┐
-                    │  GO POLICY │
-                    │ Fast Control│
-                    └─────┬──────┘
-                          │
-                     Control State
-                          │
-                    ┌─────▼──────┐
-                    │   SAFETY   │
-                    │    LAYER   │
-                    └─────┬──────┘
-                          │
-                    Controller Adapter
-                          │
-                    Reverse-Engineered
-                       Interface
-                          │
-                          ▼
-                         DRONE
-                    ┌─────┴─────┐
-                    │           │
-                 Cameras       IMU
-                    │           │
-                    └─────┬─────┘
-                          ▼
-                   State Estimation
-                          │
-                          └──────→ GO
-```
+![architecture_diagram](image/README/novex_architecture_16x9.svg)
 
 ---
 
@@ -97,30 +49,7 @@ GO is Novex's lightweight real-time control layer.
 
 Instead of using a large language model for every control decision, GO continuously processes the drone's current state and mission objective.
 
-```text
-Sensors
-   │
-   ▼
-State Estimation
-   │
-   ├── Position
-   ├── Velocity
-   ├── Orientation
-   ├── Target
-   └── Obstacles
-          │
-          ▼
-       GO Policy
-          │
-          ▼
- Controller Values
-          │
-          ▼
- Safety Layer
-          │
-          ▼
- Drone Interface
-```
+![fastpolicy_diagram](image/README/novex_sensor_pipeline_16x9.svg)
 
 GO is intended to operate at a much higher frequency than the high-level reasoning system.
 
@@ -235,33 +164,18 @@ This allows robotic agents to operate as part of an ecosystem rather than as iso
 
 ---
 
-## VR & Spatial Computing
-
-VR provides another interface into the Novex environment.
-
-A spatial representation of the physical world can potentially be viewed through VR, allowing an operator to understand:
-
-* Robot positions
-* Environmental geometry
-* Camera perspectives
-* Missions
-* Paths
-* Obstacles
-* System status
-
-The long-term goal is to make the boundary between the physical and digital environments increasingly transparent.
-
----
-
 ## High-Level AI
 
 Novex's high-level AI can be connected to an LLM for natural interaction and mission planning.
 
-For example:
+> **We are also thinking of putting a slm or collective on device ai
+> **Experimenting with radio weights
+> For example:
 
 ```text
 "Keep Drone 1 near me and have
 Drones 2 and 3 orbit around it."
+-This isnt a real example but thoughts.
 ```
 
 The LLM can translate the request into a structured mission.
@@ -318,9 +232,13 @@ Current areas of development include:
 
 Novex involves physical robotic systems.
 
-Early development should prioritize simulation, bench testing, controlled environments, low-energy experiments, and independent safety systems before attempting autonomous flight.
+Early development should go for simulation, bench testing, controlled environments, low-energy experiments, and independent safety systems before attempting autonomous flight.
 
 The objective is to make the system **predictable before making it autonomous.**
+
+Love this since we need to understand the actions before making it autonomous.
+
+3D generated Simulation is still in the works.
 
 ---
 
@@ -330,23 +248,21 @@ Novex is built around one principle:
 
 > **Don't make one giant AI do everything. Build systems that specialize.**
 
-A fast controller handles reflexes.
+1. A fast controller handles reflexes.
+2. A spatial system handles perception.
+3. An AI handles reasoning.
+4. A communication layer connects everything.
+5. A safety system keeps the physical world from becoming a debugging loop.
 
-A spatial system handles perception.
+And the commander remains in control.
 
-An AI handles reasoning.
-
-A communication layer connects everything.
-
-A safety system keeps the physical world from becoming a debugging session.
-
-And the human remains in control.
+Im looking forward to documented flights, 3D map representation, Scans, Personal Clouds, and SATCOM (Sattelite like imagery and data connection)
 
 ## Schematics
 
 ![1792184457926](image/README/1792184457926.png)
 
-[![View PCB on KiCanvas](https://hack.club/pcb-badge)](<https://kicanvas.org/?repo=https://github.com/xisolatedev/Novex/blob/main/board_cad/novex_rasp_hat/novex_rasp_hat.cad>)
+[![View PCB on KiCanvas](https://hack.club/pcb-badge)](https://kicanvas.org/?repo=https://github.com/xisolatedev/Novex/blob/main/board_cad/novex_rasp_hat/novex_rasp_hat.cad)
 
 Firmware isnt fully tested to hardware
 V2 Prototype underway.

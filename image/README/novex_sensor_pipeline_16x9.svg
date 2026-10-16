@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-label="NOVEX sensor to drone control pipeline">
+<defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#0b1220"/><stop offset="1" stop-color="#101d33"/></linearGradient><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#42d9e8"/></marker><style>text{font-family:Inter,Arial,sans-serif;fill:#ecf7ff}.box{fill:#17283e;stroke:#3d637d;stroke-width:2}.major{fill:#153b4b;stroke:#42d9e8;stroke-width:2.5}.label{font-size:28px;font-weight:650;text-anchor:middle}.small{font-size:22px;fill:#b5cadb}.flow{stroke:#42d9e8;stroke-width:4;fill:none;marker-end:url(#arrow)}.branch{stroke:#5d91ac;stroke-width:3;fill:none}</style></defs>
+<rect width="1600" height="900" fill="url(#bg)"/><text x="800" y="82" text-anchor="middle" font-size="42" font-weight="750">NOVEX · Sensor-to-Control Pipeline</text><text x="800" y="122" text-anchor="middle" class="small">Perception → State → Policy → Safety → Drone</text>
+<rect class="major" x="85" y="365" width="220" height="120" rx="18"/><text class="label" x="195" y="434">Sensors</text>
+<path class="flow" d="M305 425 H385"/>
+<rect class="major" x="390" y="365" width="260" height="120" rx="18"/><text class="label" x="520" y="417">State</text><text class="label" x="520" y="453">Estimation</text>
+<path class="branch" d="M520 365 V275 H755"/><path class="branch" d="M755 235 V555"/>
+<g><rect class="box" x="780" y="208" width="225" height="62" rx="12"/><text class="small" x="892" y="247" text-anchor="middle">Position</text><path class="branch" d="M755 239 H780"/>
+<rect class="box" x="780" y="288" width="225" height="62" rx="12"/><text class="small" x="892" y="327" text-anchor="middle">Velocity</text><path class="branch" d="M755 319 H780"/>
+<rect class="box" x="780" y="368" width="225" height="62" rx="12"/><text class="small" x="892" y="407" text-anchor="middle">Orientation</text><path class="branch" d="M755 399 H780"/>
+<rect class="box" x="780" y="448" width="225" height="62" rx="12"/><text class="small" x="892" y="487" text-anchor="middle">Target</text><path class="branch" d="M755 479 H780"/>
+<rect class="box" x="780" y="528" width="225" height="62" rx="12"/><text class="small" x="892" y="567" text-anchor="middle">Obstacles</text><path class="branch" d="M755 559 H780"/></g>
+<path class="flow" d="M650 425 H1080"/><rect class="major" x="1085" y="365" width="230" height="120" rx="18"/><text class="label" x="1200" y="435">GO Policy</text>
+<path class="flow" d="M1200 485 V630"/><rect class="box" x="1060" y="635" width="280" height="76" rx="15"/><text class="label" x="1200" y="681">Controller Values</text>
+<path class="flow" d="M1060 673 H895"/><rect class="box" x="660" y="635" width="230" height="76" rx="15"/><text class="label" x="775" y="681">Safety Layer</text>
+<path class="flow" d="M660 673 H475"/><rect class="major" x="195" y="635" width="275" height="76" rx="15"/><text class="label" x="332" y="681">Drone Interface</text>
+<text x="800" y="840" text-anchor="middle" class="small">Estimated state drives control decisions; safety validates commands before output.</text>
+</svg>
