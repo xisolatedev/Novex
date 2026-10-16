@@ -345,3 +345,5 @@ And the human remains in control.
 ## Schematics
 
 ![1792184457926](image/README/1792184457926.png)
+
+[![View PCB on KiCanvas](https://hack.club/pcb-badge)](<https://kicanvas.org/?repo=https://github.com/xisolatedev/Novex/tree/main/board_cad/novex_rasp_hat.cad>)
