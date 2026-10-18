@@ -262,7 +262,7 @@
       "internal_id": "",
       "mfg": "",
       "mpn": "",
-      "sch_revision": ""
+      "sch_revision": "v1"
     },
     "layer_pairs": [],
     "layer_presets": [],
@@ -572,7 +572,7 @@
       "plot": "",
       "pos_files": "",
       "specctra_dsn": "",
-      "step": "",
+      "step": "novex_rasp_hat.step",
       "svg": "",
       "vrml": ""
     },
@@ -705,7 +705,7 @@
         "uuid": "e63e39d7-6ac0-4ffd-8aa3-1841a4541b55"
       }
     ],
-    "used_designators": "J2-3,TP1-4,lora1",
+    "used_designators": "#PWR5,#PWR8-18,C2-5,ESP_USB1,J2-3,L1,Q1,R3-6,TP1-5,U2-3,Y1,bat0+1,bat1+1,esp_spi1,lora1",
     "variants": []
   },
   "sheets": [
